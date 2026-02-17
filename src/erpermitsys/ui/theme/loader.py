@@ -5,6 +5,8 @@ from typing import Iterable, Literal
 
 from PySide6.QtWidgets import QApplication
 
+from erpermitsys.ui.assets import icon_asset_path
+
 
 _THEME_DIR = Path(__file__).resolve().parent
 ThemeMode = Literal["light", "dark"]
@@ -13,6 +15,19 @@ _MODE_QSS_FILES: dict[ThemeMode, tuple[str, ...]] = {
     "light": ("window.qss", "window_light.qss"),
     "dark": ("window.qss", "window_dark.qss"),
 }
+
+
+def _qss_url_path(path: str) -> str:
+    try:
+        return Path(path).resolve().as_posix()
+    except Exception:
+        return str(path).replace("\\", "/")
+
+
+def _theme_tokens(mode: ThemeMode) -> dict[str, str]:
+    return {
+        "{{ICON_DROPDOWN_ARROW}}": _qss_url_path(icon_asset_path("dropdown_arrow.svg", mode=mode)),
+    }
 
 
 def load_stylesheet(
@@ -25,12 +40,15 @@ def load_stylesheet(
         _MODE_QSS_FILES[_DEFAULT_MODE],
     )
 
+    tokens = _theme_tokens(mode)
     parts: list[str] = []
     for file_name in selected_files:
         qss_path = _THEME_DIR / file_name
         if not qss_path.exists():
             continue
         stylesheet = qss_path.read_text(encoding="utf-8").strip()
+        for token, replacement in tokens.items():
+            stylesheet = stylesheet.replace(token, replacement)
         if stylesheet:
             parts.append(stylesheet)
     return "\n\n".join(parts)

@@ -15,7 +15,7 @@ from erpermitsys.app.tracker_models import TrackerDataBundle
 BACKEND_LOCAL_JSON = "local_json"
 BACKEND_SUPABASE = "supabase"
 DEFAULT_DATA_FILE_NAME = "permit_tracker_data.json"
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _APP_ID = "erpermitsys"
 
 

@@ -52,8 +52,33 @@ QWidget#PermitPanelHost {
     background: transparent;
 }
 
+QWidget#TrackerRightColumn {
+    background: transparent;
+}
+
+QFrame#WindowContainer {
+    border-radius: 14px;
+}
+
+QWidget#WindowBody {
+    background: transparent;
+}
+
+QLabel#TitleIcon {
+    min-width: 16px;
+    min-height: 16px;
+}
+
+QDialog#FramelessDialog {
+    background: transparent;
+}
+
 QFrame#TrackerPanel {
     border-radius: 14px;
+}
+
+QFrame#TrackerPanel[active="true"] {
+    border-width: 2px;
 }
 
 QLabel#TrackerPanelTitle {
@@ -84,6 +109,35 @@ QComboBox#TrackerPanelFilter {
     min-width: 128px;
 }
 
+QComboBox#TrackerPanelFilter::drop-down,
+QComboBox#PermitFormCombo::drop-down,
+QComboBox#PluginKindFilter::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
+    margin: 2px 2px 2px 0px;
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+QComboBox#TrackerPanelFilter::down-arrow,
+QComboBox#PermitFormCombo::down-arrow,
+QComboBox#PluginKindFilter::down-arrow {
+    image: url("{{ICON_DROPDOWN_ARROW}}");
+    width: 12px;
+    height: 12px;
+    margin-right: 7px;
+    margin-top: 0px;
+    border: none;
+    background: transparent;
+}
+
+QComboBox#TrackerPanelFilter::down-arrow:on,
+QComboBox#PermitFormCombo::down-arrow:on,
+QComboBox#PluginKindFilter::down-arrow:on {
+    margin-top: 1px;
+}
+
 QLabel#TrackerPanelMeta {
     font-size: 11px;
     font-weight: 620;
@@ -111,6 +165,21 @@ QListWidget#TrackerPanelList::item:hover {
 QListWidget#TrackerPanelList::item:selected {
     border: none;
     background: transparent;
+}
+
+QWidget#PermitCategoryPicker {
+    border: none;
+    background: transparent;
+    padding: 0px;
+}
+
+QPushButton#PermitCategoryPill {
+    border-radius: 16px;
+    min-height: 34px;
+    padding: 7px 16px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
 }
 
 QFrame#TrackerListCard {
@@ -144,21 +213,40 @@ QLabel#TrackerListFieldValue {
 
 QLabel#TrackerListFieldValue[field="client"],
 QLabel#TrackerListFieldValue[field="contractor"],
-QLabel#TrackerListFieldValue[field="parcel"] {
+QLabel#TrackerListFieldValue[field="county"],
+QLabel#TrackerListFieldValue[field="address"] {
     font-size: 14px;
     font-weight: 760;
     letter-spacing: 0.2px;
 }
 
-QLabel#TrackerListFieldValue[field="address"] {
-    font-size: 12px;
-    font-weight: 620;
+QLabel#TrackerListFieldValue[field="parcel"] {
+    font-size: 11px;
+    font-weight: 540;
 }
 
 QLabel#TrackerListFieldValue[field="email"],
 QLabel#TrackerListFieldValue[field="number"],
+QLabel#TrackerListFieldValue[field="url"],
 QLabel#TrackerListFieldValue[field="request"] {
     font-size: 11px;
+    font-weight: 540;
+}
+
+QLabel#TrackerListFieldValue[field="document"] {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+QLabel#TrackerListFieldValue[field="folder"] {
+    font-size: 11px;
+    font-weight: 620;
+}
+
+QLabel#TrackerListFieldValue[field="size"],
+QLabel#TrackerListFieldValue[field="added"] {
+    font-size: 10px;
     font-weight: 540;
 }
 
@@ -168,6 +256,111 @@ QWidget#PermitFormView {
 
 QFrame#PermitFormCard {
     border-radius: 14px;
+}
+
+QFrame#PermitDocumentsSection {
+    border-radius: 10px;
+}
+
+QLabel#PermitDocumentsTitle {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+QLabel#PermitDocumentStatus {
+    font-size: 10px;
+    font-weight: 620;
+    letter-spacing: 0.25px;
+}
+
+QPushButton#PermitFolderNavButton {
+    min-height: 30px;
+    min-width: 54px;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 620;
+}
+
+QWidget#PermitBreadcrumbStrip {
+    background: transparent;
+}
+
+QPushButton#PermitBreadcrumbButton {
+    min-height: 30px;
+    border-radius: 14px;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 620;
+    letter-spacing: 0.25px;
+}
+
+QPushButton#PermitBreadcrumbButton[current="true"] {
+    font-weight: 720;
+}
+
+QPushButton#PermitBreadcrumbToggleButton {
+    min-height: 30px;
+    min-width: 30px;
+    max-width: 30px;
+    border-radius: 14px;
+    padding: 0px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QLabel#PermitBreadcrumbSeparator {
+    font-size: 11px;
+    font-weight: 680;
+    padding: 0px 1px;
+}
+
+QPushButton#PermitFolderToggleButton {
+    min-height: 30px;
+    min-width: 30px;
+    max-width: 30px;
+    border-radius: 15px;
+    padding: 0px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QWidget#PermitFolderSubfolderPanel {
+    border-radius: 8px;
+}
+
+QPushButton#PermitSubfolderButton {
+    min-height: 28px;
+    border-radius: 7px;
+    padding: 5px 10px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 620;
+}
+
+QListWidget#PermitDocumentList {
+    border-radius: 8px;
+    padding: 6px;
+    outline: none;
+    min-height: 138px;
+}
+
+QListWidget#PermitDocumentList::item {
+    margin: 3px 1px;
+    padding: 1px 0px;
+    border: none;
+    background: transparent;
+}
+
+QListWidget#PermitDocumentList::item:hover {
+    border: none;
+    background: transparent;
+}
+
+QListWidget#PermitDocumentList::item:selected {
+    border: none;
+    background: transparent;
 }
 
 QLabel#PermitFormTitle {

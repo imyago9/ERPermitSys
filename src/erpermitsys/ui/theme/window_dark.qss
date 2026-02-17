@@ -53,6 +53,11 @@ QFrame#TrackerPanel {
     border: 1px solid rgba(93, 123, 153, 170);
 }
 
+QFrame#TrackerPanel[active="true"] {
+    background: rgba(31, 46, 64, 222);
+    border: 2px solid rgba(140, 192, 242, 230);
+}
+
 QLabel#TrackerPanelTitle {
     color: rgba(224, 236, 249, 236);
 }
@@ -118,6 +123,44 @@ QListWidget#TrackerPanelList::item:selected {
     background: transparent;
 }
 
+QWidget#PermitCategoryPicker {
+    border: none;
+    background: transparent;
+}
+
+QPushButton#PermitCategoryPill {
+    color: rgba(198, 220, 245, 234);
+    border: 1px solid rgba(86, 115, 145, 198);
+    background: rgba(34, 50, 68, 216);
+}
+
+QPushButton#PermitCategoryPill:hover {
+    border-color: rgba(126, 173, 219, 224);
+    background: rgba(43, 63, 85, 228);
+}
+
+QPushButton#PermitCategoryPill:checked {
+    color: rgba(238, 246, 255, 244);
+    border-color: rgba(152, 202, 246, 232);
+    background: rgba(61, 98, 133, 236);
+}
+
+QPushButton#PermitCategoryPill:pressed {
+    background: rgba(52, 83, 113, 240);
+}
+
+QPushButton#PermitCategoryPill:disabled {
+    color: rgba(170, 196, 223, 220);
+    border-color: rgba(87, 116, 146, 188);
+    background: rgba(35, 52, 71, 214);
+}
+
+QPushButton#PermitCategoryPill:checked:disabled {
+    color: rgba(236, 246, 255, 242);
+    border-color: rgba(143, 193, 240, 220);
+    background: rgba(62, 98, 133, 228);
+}
+
 QFrame#TrackerListCard {
     border-color: rgba(82, 113, 143, 176);
     background: rgba(36, 52, 70, 222);
@@ -143,18 +186,33 @@ QLabel#TrackerListFieldValue {
 
 QLabel#TrackerListFieldValue[field="client"],
 QLabel#TrackerListFieldValue[field="contractor"],
-QLabel#TrackerListFieldValue[field="parcel"] {
+QLabel#TrackerListFieldValue[field="county"],
+QLabel#TrackerListFieldValue[field="address"] {
     color: rgba(236, 244, 253, 248);
 }
 
-QLabel#TrackerListFieldValue[field="address"] {
+QLabel#TrackerListFieldValue[field="parcel"] {
     color: rgba(196, 216, 238, 224);
 }
 
 QLabel#TrackerListFieldValue[field="email"],
 QLabel#TrackerListFieldValue[field="number"],
+QLabel#TrackerListFieldValue[field="url"],
 QLabel#TrackerListFieldValue[field="request"] {
     color: rgba(171, 196, 223, 206);
+}
+
+QLabel#TrackerListFieldValue[field="document"] {
+    color: rgba(238, 246, 255, 246);
+}
+
+QLabel#TrackerListFieldValue[field="folder"] {
+    color: rgba(188, 213, 239, 220);
+}
+
+QLabel#TrackerListFieldValue[field="size"],
+QLabel#TrackerListFieldValue[field="added"] {
+    color: rgba(165, 191, 218, 200);
 }
 
 QFrame#TrackerListDot[field="client"] {
@@ -165,12 +223,20 @@ QFrame#TrackerListDot[field="contractor"] {
     background: rgba(112, 215, 169, 236);
 }
 
+QFrame#TrackerListDot[field="county"] {
+    background: rgba(120, 185, 243, 238);
+}
+
 QFrame#TrackerListDot[field="email"] {
     background: rgba(169, 138, 243, 238);
 }
 
 QFrame#TrackerListDot[field="number"] {
     background: rgba(241, 189, 96, 238);
+}
+
+QFrame#TrackerListDot[field="url"] {
+    background: rgba(128, 186, 246, 238);
 }
 
 QFrame#TrackerListDot[field="address"] {
@@ -185,6 +251,22 @@ QFrame#TrackerListDot[field="request"] {
     background: rgba(205, 169, 248, 236);
 }
 
+QFrame#TrackerListDot[field="document"] {
+    background: rgba(132, 203, 250, 238);
+}
+
+QFrame#TrackerListDot[field="folder"] {
+    background: rgba(136, 224, 178, 236);
+}
+
+QFrame#TrackerListDot[field="size"] {
+    background: rgba(246, 198, 110, 236);
+}
+
+QFrame#TrackerListDot[field="added"] {
+    background: rgba(208, 173, 248, 236);
+}
+
 QWidget#PermitFormView QLabel {
     color: rgba(203, 219, 238, 232);
 }
@@ -192,6 +274,111 @@ QWidget#PermitFormView QLabel {
 QFrame#PermitFormCard {
     background: rgba(22, 34, 47, 236);
     border: 1px solid rgba(91, 120, 149, 188);
+}
+
+QFrame#PermitDocumentsSection {
+    background: rgba(29, 44, 60, 232);
+    border: 1px solid rgba(88, 120, 150, 186);
+}
+
+QLabel#PermitDocumentsTitle {
+    color: rgba(224, 236, 249, 242);
+}
+
+QLabel#PermitDocumentStatus {
+    color: rgba(164, 191, 219, 214);
+}
+
+QPushButton#PermitFolderNavButton {
+    color: rgba(202, 221, 240, 236);
+    border: 1px solid rgba(86, 116, 146, 200);
+    background: rgba(39, 57, 76, 232);
+}
+
+QPushButton#PermitFolderNavButton:hover {
+    border-color: rgba(121, 171, 219, 226);
+    background: rgba(49, 72, 96, 238);
+}
+
+QPushButton#PermitBreadcrumbButton {
+    color: rgba(168, 193, 220, 210);
+    border: 1px solid rgba(77, 106, 135, 188);
+    background: rgba(34, 50, 68, 216);
+}
+
+QPushButton#PermitBreadcrumbButton:hover {
+    color: rgba(198, 218, 239, 230);
+    border-color: rgba(112, 152, 191, 214);
+    background: rgba(43, 63, 86, 232);
+}
+
+QPushButton#PermitBreadcrumbButton[current="true"] {
+    color: rgba(240, 247, 255, 248);
+    border: 1px solid rgba(152, 200, 245, 236);
+    background: rgba(66, 103, 141, 238);
+}
+
+QPushButton#PermitBreadcrumbToggleButton {
+    color: rgba(218, 233, 248, 238);
+    border: 1px solid rgba(92, 122, 153, 208);
+    background: rgba(44, 64, 85, 234);
+}
+
+QPushButton#PermitBreadcrumbToggleButton:hover {
+    border-color: rgba(127, 175, 220, 228);
+    background: rgba(53, 77, 102, 240);
+}
+
+QLabel#PermitBreadcrumbSeparator {
+    color: rgba(136, 166, 197, 192);
+}
+
+QPushButton#PermitFolderToggleButton {
+    color: rgba(218, 233, 248, 238);
+    border: 1px solid rgba(92, 122, 153, 208);
+    background: rgba(44, 64, 85, 234);
+}
+
+QPushButton#PermitFolderToggleButton:hover {
+    border-color: rgba(127, 175, 220, 228);
+    background: rgba(53, 77, 102, 240);
+}
+
+QWidget#PermitFolderSubfolderPanel {
+    border: 1px solid rgba(85, 116, 146, 188);
+    background: rgba(26, 39, 54, 236);
+}
+
+QPushButton#PermitSubfolderButton {
+    color: rgba(203, 221, 241, 236);
+    border: 1px solid rgba(84, 114, 144, 188);
+    background: rgba(37, 54, 73, 232);
+}
+
+QPushButton#PermitSubfolderButton:hover {
+    border-color: rgba(126, 173, 219, 224);
+    background: rgba(48, 70, 95, 238);
+}
+
+QListWidget#PermitDocumentList {
+    color: rgba(210, 225, 243, 238);
+    border: 1px solid rgba(83, 113, 143, 190);
+    background: rgba(27, 40, 56, 230);
+}
+
+QListWidget#PermitDocumentList::item {
+    border: none;
+    background: transparent;
+}
+
+QListWidget#PermitDocumentList::item:hover {
+    border: none;
+    background: transparent;
+}
+
+QListWidget#PermitDocumentList::item:selected {
+    border: none;
+    background: transparent;
 }
 
 QLabel#PermitFormTitle {
@@ -455,10 +642,17 @@ QComboBox#PluginKindFilter:focus {
     background: rgba(41, 59, 80, 236);
 }
 
+QComboBox#TrackerPanelFilter::drop-down,
+QComboBox#PermitFormCombo::drop-down,
 QComboBox#PluginKindFilter::drop-down {
-    width: 24px;
-    border: none;
-    background: transparent;
+    border-left: 1px solid rgba(79, 108, 138, 205);
+    background: rgba(45, 66, 88, 216);
+}
+
+QComboBox#TrackerPanelFilter::drop-down:hover,
+QComboBox#PermitFormCombo::drop-down:hover,
+QComboBox#PluginKindFilter::drop-down:hover {
+    background: rgba(54, 78, 104, 228);
 }
 
 QComboBox#PluginKindFilter QAbstractItemView {
