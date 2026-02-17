@@ -1,0 +1,5 @@
+PySide6>=6.7,<7
+
+# Space plugin audio-reactive backend
+numpy>=1.26,<3
+soundcard>=0.4.3

@@ -72,10 +72,117 @@ QPushButton#TrackerPanelActionButton:pressed {
     background: rgba(191, 218, 243, 242);
 }
 
+QLineEdit#TrackerPanelSearch,
+QComboBox#TrackerPanelFilter {
+    color: rgba(35, 62, 90, 236);
+    border: 1px solid rgba(140, 176, 208, 208);
+    background: rgba(252, 255, 255, 248);
+}
+
+QLineEdit#TrackerPanelSearch:focus,
+QComboBox#TrackerPanelFilter:focus {
+    border-color: rgba(95, 160, 220, 236);
+    background: rgba(255, 255, 255, 252);
+}
+
+QComboBox#TrackerPanelFilter QAbstractItemView {
+    color: rgba(35, 61, 88, 236);
+    border: 1px solid rgba(137, 173, 206, 214);
+    background: rgba(248, 252, 255, 248);
+    selection-background-color: rgba(165, 214, 252, 212);
+    selection-color: rgba(24, 51, 80, 246);
+}
+
+QLabel#TrackerPanelMeta {
+    color: rgba(70, 105, 138, 224);
+}
+
 QListWidget#TrackerPanelList {
     color: rgba(39, 66, 96, 236);
     border: 1px solid rgba(156, 191, 220, 204);
     background: rgba(248, 252, 255, 240);
+}
+
+QListWidget#TrackerPanelList::item {
+    border: none;
+    background: transparent;
+}
+
+QListWidget#TrackerPanelList::item:hover {
+    border: none;
+    background: transparent;
+}
+
+QListWidget#TrackerPanelList::item:selected {
+    border: none;
+    background: transparent;
+}
+
+QFrame#TrackerListCard {
+    border-color: rgba(149, 186, 218, 204);
+    background: rgba(236, 247, 255, 240);
+}
+
+QFrame#TrackerListCard:hover {
+    border-color: rgba(120, 168, 209, 220);
+    background: rgba(225, 241, 255, 244);
+}
+
+QFrame#TrackerListCard[selected="true"] {
+    border-color: rgba(90, 153, 211, 232);
+    background: rgba(206, 230, 250, 246);
+}
+
+QLabel#TrackerListFieldLabel {
+    color: rgba(88, 121, 154, 198);
+}
+
+QLabel#TrackerListFieldValue {
+    color: rgba(49, 80, 111, 228);
+}
+
+QLabel#TrackerListFieldValue[field="client"],
+QLabel#TrackerListFieldValue[field="contractor"],
+QLabel#TrackerListFieldValue[field="parcel"] {
+    color: rgba(26, 55, 85, 242);
+}
+
+QLabel#TrackerListFieldValue[field="address"] {
+    color: rgba(64, 95, 126, 224);
+}
+
+QLabel#TrackerListFieldValue[field="email"],
+QLabel#TrackerListFieldValue[field="number"],
+QLabel#TrackerListFieldValue[field="request"] {
+    color: rgba(89, 118, 146, 206);
+}
+
+QFrame#TrackerListDot[field="client"] {
+    background: rgba(73, 157, 214, 242);
+}
+
+QFrame#TrackerListDot[field="contractor"] {
+    background: rgba(63, 172, 133, 242);
+}
+
+QFrame#TrackerListDot[field="email"] {
+    background: rgba(132, 104, 214, 242);
+}
+
+QFrame#TrackerListDot[field="number"] {
+    background: rgba(214, 156, 61, 242);
+}
+
+QFrame#TrackerListDot[field="address"] {
+    background: rgba(206, 101, 104, 242);
+}
+
+QFrame#TrackerListDot[field="parcel"] {
+    background: rgba(61, 172, 212, 242);
+}
+
+QFrame#TrackerListDot[field="request"] {
+    background: rgba(155, 117, 219, 242);
 }
 
 QWidget#PermitFormView QLabel {
@@ -136,6 +243,21 @@ QPushButton#PermitFormPrimaryButton:hover {
 
 QPushButton#PermitFormPrimaryButton:pressed {
     background: rgba(68, 125, 181, 242);
+}
+
+QPushButton#PermitFormDangerButton {
+    color: rgba(255, 245, 246, 246);
+    border: 1px solid rgba(204, 104, 122, 228);
+    background: rgba(182, 80, 99, 236);
+}
+
+QPushButton#PermitFormDangerButton:hover {
+    border-color: rgba(214, 115, 133, 236);
+    background: rgba(196, 92, 111, 240);
+}
+
+QPushButton#PermitFormDangerButton:pressed {
+    background: rgba(166, 72, 90, 244);
 }
 
 QDialog#ContactEntryDialog {

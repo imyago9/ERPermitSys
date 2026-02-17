@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
 from typing import Sequence
 
 from PySide6.QtCore import QEvent, QTimer, Qt, QUrl
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFrame,
     QFormLayout,
     QGraphicsDropShadowEffect,
@@ -18,8 +15,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QStackedLayout,
     QVBoxLayout,
     QWidget,
@@ -35,6 +34,11 @@ except Exception:  # pragma: no cover - optional runtime dependency
     QWebChannel = None  # type: ignore[assignment]
 
 from erpermitsys.app.command_runtime import AppCommandContext, CommandRuntime
+from erpermitsys.app.data_store import (
+    BACKEND_LOCAL_JSON,
+    BACKEND_SUPABASE,
+    LocalJsonDataStore,
+)
 from erpermitsys.app.background_plugin_bridge import BackgroundPluginBridge
 from erpermitsys.core import StateStreamer
 from erpermitsys.plugins import PluginManager
@@ -42,94 +46,23 @@ from erpermitsys.plugins.api import PluginApiService
 from erpermitsys.app.settings_store import (
     DEFAULT_PALETTE_SHORTCUT,
     load_active_plugin_ids,
+    load_data_storage_backend,
+    load_data_storage_folder,
     load_dark_mode,
     load_palette_shortcut_enabled,
     load_palette_shortcut_keybind,
+    normalize_data_storage_folder,
     save_active_plugin_ids,
+    save_data_storage_backend,
+    save_data_storage_folder,
     save_dark_mode,
     save_palette_shortcut_settings,
 )
+from erpermitsys.app.tracker_models import ContactRecord, PermitRecord, TrackerDataBundle
 from erpermitsys.ui.assets import icon_asset_path
 from erpermitsys.ui.settings import SettingsDialog
 from erpermitsys.ui.theme import apply_app_theme
 from erpermitsys.ui.window.frameless_window import FramelessWindow
-
-
-@dataclass
-class ContactRecord:
-    name: str
-    number: str
-    email: str
-
-
-@dataclass
-class PermitRecord:
-    parcel_id: str
-    address: str
-    request_date: str
-    application_date: str
-    completion_date: str
-    client_name: str
-    contractor_name: str
-
-
-class ContactEntryDialog(QDialog):
-    def __init__(self, *, title: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("ContactEntryDialog")
-        self.setWindowTitle(title)
-        self.setModal(True)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
-
-        heading = QLabel(title, self)
-        heading.setObjectName("ContactEntryDialogTitle")
-        layout.addWidget(heading)
-
-        form_layout = QFormLayout()
-        form_layout.setContentsMargins(0, 0, 0, 0)
-        form_layout.setSpacing(8)
-
-        self._name_input = QLineEdit(self)
-        self._name_input.setObjectName("ContactEntryName")
-        self._name_input.setPlaceholderText("Full name")
-        self._number_input = QLineEdit(self)
-        self._number_input.setObjectName("ContactEntryNumber")
-        self._number_input.setPlaceholderText("Phone number")
-        self._email_input = QLineEdit(self)
-        self._email_input.setObjectName("ContactEntryEmail")
-        self._email_input.setPlaceholderText("Email")
-
-        form_layout.addRow("Name", self._name_input)
-        form_layout.addRow("Number", self._number_input)
-        form_layout.addRow("Email", self._email_input)
-        layout.addLayout(form_layout)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel,
-            parent=self,
-        )
-        self._save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-        self._name_input.textChanged.connect(self._sync_save_enabled)
-        self._sync_save_enabled()
-
-    def _sync_save_enabled(self) -> None:
-        if self._save_button is None:
-            return
-        self._save_button.setEnabled(bool(self._name_input.text().strip()))
-
-    def record(self) -> ContactRecord:
-        return ContactRecord(
-            name=self._name_input.text().strip(),
-            number=self._number_input.text().strip(),
-            email=self._email_input.text().strip(),
-        )
 
 
 class ErPermitSysWindow(FramelessWindow):
@@ -161,10 +94,16 @@ class ErPermitSysWindow(FramelessWindow):
         self._state_streamer = state_streamer or StateStreamer()
         self._settings_dialog: SettingsDialog | None = None
         self._command_runtime: CommandRuntime | None = None
+        self._data_storage_backend = load_data_storage_backend(default=BACKEND_LOCAL_JSON)
+        self._data_storage_folder = load_data_storage_folder()
+        self._data_store = LocalJsonDataStore(self._data_storage_folder)
 
         self._clients: list[ContactRecord] = []
         self._contractors: list[ContactRecord] = []
         self._permits: list[PermitRecord] = []
+        self._editing_client_index: int | None = None
+        self._editing_contractor_index: int | None = None
+        self._editing_permit_index: int | None = None
 
         self._stack: QStackedLayout | None = None
         self._fallback_widget: QFrame | None = None
@@ -175,9 +114,20 @@ class ErPermitSysWindow(FramelessWindow):
         self._panel_stack: QStackedLayout | None = None
         self._panel_home_view: QWidget | None = None
         self._permit_form_view: QWidget | None = None
+        self._client_form_view: QWidget | None = None
+        self._contractor_form_view: QWidget | None = None
         self._clients_list_widget: QListWidget | None = None
         self._contractors_list_widget: QListWidget | None = None
         self._permits_list_widget: QListWidget | None = None
+        self._client_search_input: QLineEdit | None = None
+        self._client_filter_combo: QComboBox | None = None
+        self._client_result_label: QLabel | None = None
+        self._contractor_search_input: QLineEdit | None = None
+        self._contractor_filter_combo: QComboBox | None = None
+        self._contractor_result_label: QLabel | None = None
+        self._permit_search_input: QLineEdit | None = None
+        self._permit_filter_combo: QComboBox | None = None
+        self._permit_result_label: QLabel | None = None
         self._permit_parcel_input: QLineEdit | None = None
         self._permit_address_input: QLineEdit | None = None
         self._permit_request_date_input: QLineEdit | None = None
@@ -185,13 +135,31 @@ class ErPermitSysWindow(FramelessWindow):
         self._permit_completion_date_input: QLineEdit | None = None
         self._permit_client_combo: QComboBox | None = None
         self._permit_contractor_combo: QComboBox | None = None
+        self._permit_form_title_label: QLabel | None = None
+        self._permit_form_save_button: QPushButton | None = None
+        self._permit_form_delete_button: QPushButton | None = None
+        self._client_name_input: QLineEdit | None = None
+        self._client_number_input: QLineEdit | None = None
+        self._client_email_input: QLineEdit | None = None
+        self._client_form_title_label: QLabel | None = None
+        self._client_form_save_button: QPushButton | None = None
+        self._client_form_delete_button: QPushButton | None = None
+        self._contractor_name_input: QLineEdit | None = None
+        self._contractor_number_input: QLineEdit | None = None
+        self._contractor_email_input: QLineEdit | None = None
+        self._contractor_form_title_label: QLabel | None = None
+        self._contractor_form_save_button: QPushButton | None = None
+        self._contractor_form_delete_button: QPushButton | None = None
         self._settings_button: QPushButton | None = None
         self._settings_button_shadow: QGraphicsDropShadowEffect | None = None
 
+        storage_warning = self._initialize_data_store()
         self._build_body()
         self._plugin_manager.discover(auto_activate_background=False)
         self._restore_active_plugins()
         self._sync_background_from_plugins()
+        if storage_warning:
+            QTimer.singleShot(0, lambda message=storage_warning: self._show_data_storage_warning(message))
         QTimer.singleShot(0, self._sync_foreground_layout)
         self._state_streamer.record(
             "window.initialized",
@@ -296,10 +264,35 @@ class ErPermitSysWindow(FramelessWindow):
         clients_panel, clients_layout = self._create_tracker_panel(panel_home, "Clients")
         add_client_button = QPushButton("Add Client", clients_panel)
         add_client_button.setObjectName("TrackerPanelActionButton")
-        add_client_button.clicked.connect(self._add_client)
+        add_client_button.clicked.connect(self._open_add_client_form)
         clients_layout.addWidget(add_client_button)
+        client_search_input, client_filter_combo = self._build_panel_filters(
+            clients_panel,
+            placeholder="Search clients",
+            filter_options=(
+                ("All", "all"),
+                ("Has Email", "email"),
+                ("Has Number", "number"),
+                ("Missing Contact", "missing_contact"),
+            ),
+            on_change=self._refresh_clients_list,
+        )
+        clients_layout.addLayout(self._make_filter_row(client_search_input, client_filter_combo))
+        client_result_label = QLabel("0 results", clients_panel)
+        client_result_label.setObjectName("TrackerPanelMeta")
+        clients_layout.addWidget(client_result_label)
+        self._client_search_input = client_search_input
+        self._client_filter_combo = client_filter_combo
+        self._client_result_label = client_result_label
         clients_list = QListWidget(clients_panel)
         clients_list.setObjectName("TrackerPanelList")
+        clients_list.setWordWrap(True)
+        clients_list.setSpacing(8)
+        clients_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        clients_list.itemClicked.connect(self._on_client_item_selected)
+        clients_list.itemSelectionChanged.connect(
+            lambda: self._refresh_list_selection_visuals(self._clients_list_widget)
+        )
         clients_layout.addWidget(clients_list, 1)
         self._clients_list_widget = clients_list
         panel_home_layout.addWidget(clients_panel, 1)
@@ -309,8 +302,34 @@ class ErPermitSysWindow(FramelessWindow):
         add_permit_button.setObjectName("TrackerPanelActionButton")
         add_permit_button.clicked.connect(self._open_add_permit_form)
         permits_layout.addWidget(add_permit_button)
+        permit_search_input, permit_filter_combo = self._build_panel_filters(
+            permits_panel,
+            placeholder="Search permits",
+            filter_options=(
+                ("All", "all"),
+                ("Has Request Date", "requested"),
+                ("Has Application Date", "applied"),
+                ("Completed", "completed"),
+                ("Open", "open"),
+            ),
+            on_change=self._refresh_permits_list,
+        )
+        permits_layout.addLayout(self._make_filter_row(permit_search_input, permit_filter_combo))
+        permit_result_label = QLabel("0 results", permits_panel)
+        permit_result_label.setObjectName("TrackerPanelMeta")
+        permits_layout.addWidget(permit_result_label)
+        self._permit_search_input = permit_search_input
+        self._permit_filter_combo = permit_filter_combo
+        self._permit_result_label = permit_result_label
         permits_list = QListWidget(permits_panel)
         permits_list.setObjectName("TrackerPanelList")
+        permits_list.setWordWrap(True)
+        permits_list.setSpacing(8)
+        permits_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        permits_list.itemClicked.connect(self._on_permit_item_selected)
+        permits_list.itemSelectionChanged.connect(
+            lambda: self._refresh_list_selection_visuals(self._permits_list_widget)
+        )
         permits_layout.addWidget(permits_list, 1)
         self._permits_list_widget = permits_list
         panel_home_layout.addWidget(permits_panel, 1)
@@ -318,27 +337,147 @@ class ErPermitSysWindow(FramelessWindow):
         contractors_panel, contractors_layout = self._create_tracker_panel(panel_home, "Contractors")
         add_contractor_button = QPushButton("Add Contractor", contractors_panel)
         add_contractor_button.setObjectName("TrackerPanelActionButton")
-        add_contractor_button.clicked.connect(self._add_contractor)
+        add_contractor_button.clicked.connect(self._open_add_contractor_form)
         contractors_layout.addWidget(add_contractor_button)
+        contractor_search_input, contractor_filter_combo = self._build_panel_filters(
+            contractors_panel,
+            placeholder="Search contractors",
+            filter_options=(
+                ("All", "all"),
+                ("Has Email", "email"),
+                ("Has Number", "number"),
+                ("Missing Contact", "missing_contact"),
+            ),
+            on_change=self._refresh_contractors_list,
+        )
+        contractors_layout.addLayout(self._make_filter_row(contractor_search_input, contractor_filter_combo))
+        contractor_result_label = QLabel("0 results", contractors_panel)
+        contractor_result_label.setObjectName("TrackerPanelMeta")
+        contractors_layout.addWidget(contractor_result_label)
+        self._contractor_search_input = contractor_search_input
+        self._contractor_filter_combo = contractor_filter_combo
+        self._contractor_result_label = contractor_result_label
         contractors_list = QListWidget(contractors_panel)
         contractors_list.setObjectName("TrackerPanelList")
+        contractors_list.setWordWrap(True)
+        contractors_list.setSpacing(8)
+        contractors_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        contractors_list.itemClicked.connect(self._on_contractor_item_selected)
+        contractors_list.itemSelectionChanged.connect(
+            lambda: self._refresh_list_selection_visuals(self._contractors_list_widget)
+        )
         contractors_layout.addWidget(contractors_list, 1)
         self._contractors_list_widget = contractors_list
         panel_home_layout.addWidget(contractors_panel, 1)
 
         panel_stack.addWidget(panel_home)
 
-        permit_form_view = QWidget(panel_host)
+        (
+            permit_form_view,
+            permit_form_title_label,
+            permit_form_save_button,
+            permit_form_delete_button,
+        ) = self._build_permit_form_view(panel_host)
+        self._permit_form_view = permit_form_view
+        self._permit_form_title_label = permit_form_title_label
+        self._permit_form_save_button = permit_form_save_button
+        self._permit_form_delete_button = permit_form_delete_button
+        panel_stack.addWidget(permit_form_view)
+
+        (
+            client_form_view,
+            client_name_input,
+            client_number_input,
+            client_email_input,
+            client_form_title_label,
+            client_form_save_button,
+            client_form_delete_button,
+        ) = self._build_contact_form_view(
+            panel_host,
+            title="Add Client",
+            save_handler=self._save_client_from_form,
+            delete_handler=self._delete_client_from_form,
+            back_handler=self._close_to_home_view,
+        )
+        self._client_form_view = client_form_view
+        self._client_name_input = client_name_input
+        self._client_number_input = client_number_input
+        self._client_email_input = client_email_input
+        self._client_form_title_label = client_form_title_label
+        self._client_form_save_button = client_form_save_button
+        self._client_form_delete_button = client_form_delete_button
+        panel_stack.addWidget(client_form_view)
+
+        (
+            contractor_form_view,
+            contractor_name_input,
+            contractor_number_input,
+            contractor_email_input,
+            contractor_form_title_label,
+            contractor_form_save_button,
+            contractor_form_delete_button,
+        ) = (
+            self._build_contact_form_view(
+                panel_host,
+                title="Add Contractor",
+                save_handler=self._save_contractor_from_form,
+                delete_handler=self._delete_contractor_from_form,
+                back_handler=self._close_to_home_view,
+            )
+        )
+        self._contractor_form_view = contractor_form_view
+        self._contractor_name_input = contractor_name_input
+        self._contractor_number_input = contractor_number_input
+        self._contractor_email_input = contractor_email_input
+        self._contractor_form_title_label = contractor_form_title_label
+        self._contractor_form_save_button = contractor_form_save_button
+        self._contractor_form_delete_button = contractor_form_delete_button
+        panel_stack.addWidget(contractor_form_view)
+
+        panel_stack.setCurrentWidget(panel_home)
+        panel_host.hide()  # Avoid initial top-left flash before first geometry sync.
+
+    def _build_panel_filters(
+        self,
+        parent: QWidget,
+        *,
+        placeholder: str,
+        filter_options: Sequence[tuple[str, str]],
+        on_change,
+    ) -> tuple[QLineEdit, QComboBox]:
+        search_input = QLineEdit(parent)
+        search_input.setObjectName("TrackerPanelSearch")
+        search_input.setPlaceholderText(placeholder)
+        search_input.textChanged.connect(lambda _text: on_change())
+
+        filter_combo = QComboBox(parent)
+        filter_combo.setObjectName("TrackerPanelFilter")
+        for label, value in filter_options:
+            filter_combo.addItem(label, value)
+        filter_combo.currentIndexChanged.connect(lambda _index: on_change())
+        return search_input, filter_combo
+
+    def _make_filter_row(self, search_input: QLineEdit, filter_combo: QComboBox) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        row.addWidget(search_input, 1)
+        row.addWidget(filter_combo, 0)
+        return row
+
+    def _build_permit_form_view(
+        self, parent: QWidget
+    ) -> tuple[QWidget, QLabel, QPushButton, QPushButton]:
+        permit_form_view = QWidget(parent)
         permit_form_view.setObjectName("PermitFormView")
         permit_form_layout = QVBoxLayout(permit_form_view)
-        permit_form_layout.setContentsMargins(0, 0, 0, 0)
+        permit_form_layout.setContentsMargins(28, 24, 28, 24)
         permit_form_layout.setSpacing(0)
-        permit_form_layout.addStretch(1)
 
         permit_form_card = QFrame(permit_form_view)
         permit_form_card.setObjectName("PermitFormCard")
-        permit_form_card.setMinimumWidth(440)
-        permit_form_card.setMaximumWidth(680)
+        permit_form_card.setMinimumWidth(420)
+        permit_form_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         permit_card_layout = QVBoxLayout(permit_form_card)
         permit_card_layout.setContentsMargins(24, 22, 24, 22)
         permit_card_layout.setSpacing(12)
@@ -402,17 +541,112 @@ class ErPermitSysWindow(FramelessWindow):
         save_button = QPushButton("Save Permit", permit_form_card)
         save_button.setObjectName("PermitFormPrimaryButton")
         save_button.clicked.connect(self._save_permit_from_form)
+        delete_button = QPushButton("Delete Permit", permit_form_card)
+        delete_button.setObjectName("PermitFormDangerButton")
+        delete_button.clicked.connect(self._delete_permit_from_form)
         permit_actions.addWidget(cancel_button)
+        permit_actions.addWidget(delete_button)
         permit_actions.addWidget(save_button)
         permit_card_layout.addLayout(permit_actions)
 
-        permit_form_layout.addWidget(permit_form_card, 0, Qt.AlignmentFlag.AlignHCenter)
-        permit_form_layout.addStretch(1)
+        self._wire_enter_to_submit(
+            permit_form_view,
+            self._save_permit_from_form,
+            (
+                parcel_id_input,
+                address_input,
+                request_date_input,
+                application_date_input,
+                completion_date_input,
+            ),
+        )
 
-        self._permit_form_view = permit_form_view
-        panel_stack.addWidget(permit_form_view)
-        panel_stack.setCurrentWidget(panel_home)
-        panel_host.hide()  # Avoid initial top-left flash before first geometry sync.
+        permit_form_layout.addWidget(permit_form_card, 1)
+        return permit_form_view, permit_form_title, save_button, delete_button
+
+    def _build_contact_form_view(
+        self,
+        parent: QWidget,
+        *,
+        title: str,
+        save_handler,
+        delete_handler,
+        back_handler,
+    ) -> tuple[QWidget, QLineEdit, QLineEdit, QLineEdit, QLabel, QPushButton, QPushButton]:
+        contact_form_view = QWidget(parent)
+        contact_form_view.setObjectName("PermitFormView")
+        contact_form_layout = QVBoxLayout(contact_form_view)
+        contact_form_layout.setContentsMargins(28, 24, 28, 24)
+        contact_form_layout.setSpacing(0)
+
+        contact_form_card = QFrame(contact_form_view)
+        contact_form_card.setObjectName("PermitFormCard")
+        contact_form_card.setMinimumWidth(420)
+        contact_form_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        contact_card_layout = QVBoxLayout(contact_form_card)
+        contact_card_layout.setContentsMargins(24, 22, 24, 22)
+        contact_card_layout.setSpacing(12)
+
+        contact_form_title = QLabel(title, contact_form_card)
+        contact_form_title.setObjectName("PermitFormTitle")
+        contact_card_layout.addWidget(contact_form_title)
+
+        contact_form_fields = QFormLayout()
+        contact_form_fields.setContentsMargins(0, 0, 0, 0)
+        contact_form_fields.setHorizontalSpacing(14)
+        contact_form_fields.setVerticalSpacing(10)
+
+        name_input = QLineEdit(contact_form_card)
+        name_input.setObjectName("PermitFormInput")
+        name_input.setPlaceholderText("Name")
+        contact_form_fields.addRow("Name", name_input)
+
+        number_input = QLineEdit(contact_form_card)
+        number_input.setObjectName("PermitFormInput")
+        number_input.setPlaceholderText("Number")
+        contact_form_fields.addRow("Number", number_input)
+
+        email_input = QLineEdit(contact_form_card)
+        email_input.setObjectName("PermitFormInput")
+        email_input.setPlaceholderText("Email")
+        contact_form_fields.addRow("Email", email_input)
+
+        contact_card_layout.addLayout(contact_form_fields)
+
+        contact_actions = QHBoxLayout()
+        contact_actions.setContentsMargins(0, 6, 0, 0)
+        contact_actions.setSpacing(10)
+        contact_actions.addStretch(1)
+        cancel_button = QPushButton("Back", contact_form_card)
+        cancel_button.setObjectName("PermitFormSecondaryButton")
+        cancel_button.clicked.connect(back_handler)
+        save_button = QPushButton("Save", contact_form_card)
+        save_button.setObjectName("PermitFormPrimaryButton")
+        save_button.clicked.connect(save_handler)
+        delete_button = QPushButton("Delete", contact_form_card)
+        delete_button.setObjectName("PermitFormDangerButton")
+        delete_button.clicked.connect(delete_handler)
+        contact_actions.addWidget(cancel_button)
+        contact_actions.addWidget(delete_button)
+        contact_actions.addWidget(save_button)
+        contact_card_layout.addLayout(contact_actions)
+
+        self._wire_enter_to_submit(
+            contact_form_view,
+            save_handler,
+            (name_input, number_input, email_input),
+        )
+
+        contact_form_layout.addWidget(contact_form_card, 1)
+        return (
+            contact_form_view,
+            name_input,
+            number_input,
+            email_input,
+            contact_form_title,
+            save_button,
+            delete_button,
+        )
 
     def _create_tracker_panel(self, parent: QWidget, title: str) -> tuple[QFrame, QVBoxLayout]:
         panel = QFrame(parent)
@@ -427,37 +661,316 @@ class ErPermitSysWindow(FramelessWindow):
         layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         return panel, layout
 
-    def _add_client(self) -> None:
-        dialog = ContactEntryDialog(title="Add Client", parent=self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+    def _wire_enter_to_submit(
+        self,
+        container: QWidget,
+        submit_handler,
+        text_inputs: Sequence[QLineEdit],
+    ) -> None:
+        for field in text_inputs:
+            field.returnPressed.connect(submit_handler)
+        return_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Return), container)
+        return_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        return_shortcut.activated.connect(submit_handler)
+        enter_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Enter), container)
+        enter_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        enter_shortcut.activated.connect(submit_handler)
+
+    def _on_client_item_selected(self, _item: QListWidgetItem) -> None:
+        index = self._extract_item_index(_item)
+        if index < 0 or index >= len(self._clients):
             return
-        self._clients.append(dialog.record())
+        self._open_edit_client_form(index)
+
+    def _on_contractor_item_selected(self, _item: QListWidgetItem) -> None:
+        index = self._extract_item_index(_item)
+        if index < 0 or index >= len(self._contractors):
+            return
+        self._open_edit_contractor_form(index)
+
+    def _on_permit_item_selected(self, _item: QListWidgetItem) -> None:
+        index = self._extract_item_index(_item)
+        if index < 0 or index >= len(self._permits):
+            return
+        self._open_edit_permit_form(index)
+
+    def _open_add_client_form(self) -> None:
+        self._editing_client_index = None
+        if self._client_form_title_label is not None:
+            self._client_form_title_label.setText("Add Client")
+        if self._client_form_save_button is not None:
+            self._client_form_save_button.setText("Save Client")
+        if self._client_form_delete_button is not None:
+            self._client_form_delete_button.setVisible(False)
+            self._client_form_delete_button.setEnabled(False)
+        self._reset_contact_form(
+            self._client_name_input,
+            self._client_number_input,
+            self._client_email_input,
+        )
+        self._open_panel_view(self._client_form_view)
+        if self._client_name_input is not None:
+            self._client_name_input.setFocus()
+
+    def _open_edit_client_form(self, index: int) -> None:
+        if index < 0 or index >= len(self._clients):
+            return
+        record = self._clients[index]
+        self._editing_client_index = index
+        if self._client_form_title_label is not None:
+            self._client_form_title_label.setText("Edit Client")
+        if self._client_form_save_button is not None:
+            self._client_form_save_button.setText("Update Client")
+        if self._client_form_delete_button is not None:
+            self._client_form_delete_button.setVisible(True)
+            self._client_form_delete_button.setEnabled(True)
+        if self._client_name_input is not None:
+            self._client_name_input.setText(record.name)
+        if self._client_number_input is not None:
+            self._client_number_input.setText(record.number)
+        if self._client_email_input is not None:
+            self._client_email_input.setText(record.email)
+        self._open_panel_view(self._client_form_view)
+        if self._client_name_input is not None:
+            self._client_name_input.setFocus()
+
+    def _open_add_contractor_form(self) -> None:
+        self._editing_contractor_index = None
+        if self._contractor_form_title_label is not None:
+            self._contractor_form_title_label.setText("Add Contractor")
+        if self._contractor_form_save_button is not None:
+            self._contractor_form_save_button.setText("Save Contractor")
+        if self._contractor_form_delete_button is not None:
+            self._contractor_form_delete_button.setVisible(False)
+            self._contractor_form_delete_button.setEnabled(False)
+        self._reset_contact_form(
+            self._contractor_name_input,
+            self._contractor_number_input,
+            self._contractor_email_input,
+        )
+        self._open_panel_view(self._contractor_form_view)
+        if self._contractor_name_input is not None:
+            self._contractor_name_input.setFocus()
+
+    def _open_edit_contractor_form(self, index: int) -> None:
+        if index < 0 or index >= len(self._contractors):
+            return
+        record = self._contractors[index]
+        self._editing_contractor_index = index
+        if self._contractor_form_title_label is not None:
+            self._contractor_form_title_label.setText("Edit Contractor")
+        if self._contractor_form_save_button is not None:
+            self._contractor_form_save_button.setText("Update Contractor")
+        if self._contractor_form_delete_button is not None:
+            self._contractor_form_delete_button.setVisible(True)
+            self._contractor_form_delete_button.setEnabled(True)
+        if self._contractor_name_input is not None:
+            self._contractor_name_input.setText(record.name)
+        if self._contractor_number_input is not None:
+            self._contractor_number_input.setText(record.number)
+        if self._contractor_email_input is not None:
+            self._contractor_email_input.setText(record.email)
+        self._open_panel_view(self._contractor_form_view)
+        if self._contractor_name_input is not None:
+            self._contractor_name_input.setFocus()
+
+    def _save_client_from_form(self) -> None:
+        if self._client_name_input is None or self._client_number_input is None or self._client_email_input is None:
+            return
+
+        name = self._client_name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Missing Name", "Please provide a client name before saving.")
+            return
+
+        record = ContactRecord(
+            name=name,
+            number=self._client_number_input.text().strip(),
+            email=self._client_email_input.text().strip(),
+        )
+        editing_index = self._editing_client_index
+        if editing_index is None:
+            self._clients.append(record)
+        elif 0 <= editing_index < len(self._clients):
+            old_name = self._clients[editing_index].name
+            self._clients[editing_index] = record
+            if old_name != record.name:
+                for permit in self._permits:
+                    if permit.client_name == old_name:
+                        permit.client_name = record.name
+                self._refresh_permits_list()
+        else:
+            self._clients.append(record)
+
         self._refresh_clients_list()
         self._refresh_party_selectors()
+        self._persist_tracker_data()
+        self._close_to_home_view()
 
-    def _add_contractor(self) -> None:
-        dialog = ContactEntryDialog(title="Add Contractor", parent=self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+    def _save_contractor_from_form(self) -> None:
+        if (
+            self._contractor_name_input is None
+            or self._contractor_number_input is None
+            or self._contractor_email_input is None
+        ):
             return
-        self._contractors.append(dialog.record())
+
+        name = self._contractor_name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Missing Name", "Please provide a contractor name before saving.")
+            return
+
+        record = ContactRecord(
+            name=name,
+            number=self._contractor_number_input.text().strip(),
+            email=self._contractor_email_input.text().strip(),
+        )
+        editing_index = self._editing_contractor_index
+        if editing_index is None:
+            self._contractors.append(record)
+        elif 0 <= editing_index < len(self._contractors):
+            old_name = self._contractors[editing_index].name
+            self._contractors[editing_index] = record
+            if old_name != record.name:
+                for permit in self._permits:
+                    if permit.contractor_name == old_name:
+                        permit.contractor_name = record.name
+                self._refresh_permits_list()
+        else:
+            self._contractors.append(record)
+
         self._refresh_contractors_list()
         self._refresh_party_selectors()
+        self._persist_tracker_data()
+        self._close_to_home_view()
+
+    def _delete_client_from_form(self) -> None:
+        index = self._editing_client_index
+        if index is None or index < 0 or index >= len(self._clients):
+            return
+        record = self._clients[index]
+        result = QMessageBox.question(
+            self,
+            "Delete Client",
+            f"Delete client '{record.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        deleted_name = record.name
+        del self._clients[index]
+        for permit in self._permits:
+            if permit.client_name == deleted_name:
+                permit.client_name = ""
+        self._refresh_clients_list()
+        self._refresh_permits_list()
+        self._refresh_party_selectors()
+        self._persist_tracker_data()
+        self._close_to_home_view()
+
+    def _delete_contractor_from_form(self) -> None:
+        index = self._editing_contractor_index
+        if index is None or index < 0 or index >= len(self._contractors):
+            return
+        record = self._contractors[index]
+        result = QMessageBox.question(
+            self,
+            "Delete Contractor",
+            f"Delete contractor '{record.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        deleted_name = record.name
+        del self._contractors[index]
+        for permit in self._permits:
+            if permit.contractor_name == deleted_name:
+                permit.contractor_name = ""
+        self._refresh_contractors_list()
+        self._refresh_permits_list()
+        self._refresh_party_selectors()
+        self._persist_tracker_data()
+        self._close_to_home_view()
 
     def _open_add_permit_form(self) -> None:
-        if self._panel_stack is None or self._permit_form_view is None:
-            return
+        self._editing_permit_index = None
+        if self._permit_form_title_label is not None:
+            self._permit_form_title_label.setText("Add Permit")
+        if self._permit_form_save_button is not None:
+            self._permit_form_save_button.setText("Save Permit")
+        if self._permit_form_delete_button is not None:
+            self._permit_form_delete_button.setVisible(False)
+            self._permit_form_delete_button.setEnabled(False)
         self._reset_permit_form()
         self._refresh_party_selectors()
-        self._panel_stack.setCurrentWidget(self._permit_form_view)
-        self._sync_foreground_layout()
+        self._open_panel_view(self._permit_form_view)
+        if self._permit_parcel_input is not None:
+            self._permit_parcel_input.setFocus()
+
+    def _open_edit_permit_form(self, index: int) -> None:
+        if index < 0 or index >= len(self._permits):
+            return
+        permit = self._permits[index]
+        self._editing_permit_index = index
+        if self._permit_form_title_label is not None:
+            self._permit_form_title_label.setText("Edit Permit")
+        if self._permit_form_save_button is not None:
+            self._permit_form_save_button.setText("Update Permit")
+        if self._permit_form_delete_button is not None:
+            self._permit_form_delete_button.setVisible(True)
+            self._permit_form_delete_button.setEnabled(True)
+
+        self._refresh_party_selectors()
+
+        if self._permit_parcel_input is not None:
+            self._permit_parcel_input.setText(permit.parcel_id)
+        if self._permit_address_input is not None:
+            self._permit_address_input.setText(permit.address)
+        if self._permit_request_date_input is not None:
+            self._permit_request_date_input.setText(permit.request_date)
+        if self._permit_application_date_input is not None:
+            self._permit_application_date_input.setText(permit.application_date)
+        if self._permit_completion_date_input is not None:
+            self._permit_completion_date_input.setText(permit.completion_date)
+        self._set_combo_selected_value(self._permit_client_combo, permit.client_name)
+        self._set_combo_selected_value(self._permit_contractor_combo, permit.contractor_name)
+
+        self._open_panel_view(self._permit_form_view)
         if self._permit_parcel_input is not None:
             self._permit_parcel_input.setFocus()
 
     def _close_add_permit_form(self) -> None:
+        self._close_to_home_view()
+
+    def _open_panel_view(self, view: QWidget | None) -> None:
+        if self._panel_stack is None or view is None:
+            return
+        self._panel_stack.setCurrentWidget(view)
+        self._sync_foreground_layout()
+
+    def _close_to_home_view(self) -> None:
         if self._panel_stack is None or self._panel_home_view is None:
             return
+        self._editing_client_index = None
+        self._editing_contractor_index = None
+        self._editing_permit_index = None
         self._panel_stack.setCurrentWidget(self._panel_home_view)
         self._sync_foreground_layout()
+
+    def _reset_contact_form(
+        self,
+        name_input: QLineEdit | None,
+        number_input: QLineEdit | None,
+        email_input: QLineEdit | None,
+    ) -> None:
+        for field in (name_input, number_input, email_input):
+            if field is None:
+                continue
+            field.clear()
 
     def _reset_permit_form(self) -> None:
         inputs = (
@@ -503,12 +1016,6 @@ class ErPermitSysWindow(FramelessWindow):
         if not address:
             QMessageBox.warning(self, "Missing Address", "Please provide an Address before saving.")
             return
-        if not client_name:
-            QMessageBox.warning(self, "Missing Client", "Add at least one client and select it.")
-            return
-        if not contractor_name:
-            QMessageBox.warning(self, "Missing Contractor", "Add at least one contractor and select it.")
-            return
 
         permit = PermitRecord(
             parcel_id=parcel_id,
@@ -519,58 +1026,319 @@ class ErPermitSysWindow(FramelessWindow):
             client_name=client_name,
             contractor_name=contractor_name,
         )
-        self._permits.append(permit)
+        editing_index = self._editing_permit_index
+        if editing_index is None:
+            self._permits.append(permit)
+        elif 0 <= editing_index < len(self._permits):
+            self._permits[editing_index] = permit
+        else:
+            self._permits.append(permit)
         self._refresh_permits_list()
+        self._persist_tracker_data()
+        self._close_add_permit_form()
+
+    def _delete_permit_from_form(self) -> None:
+        index = self._editing_permit_index
+        if index is None or index < 0 or index >= len(self._permits):
+            return
+        permit = self._permits[index]
+        label = permit.parcel_id or permit.address or "selected permit"
+        result = QMessageBox.question(
+            self,
+            "Delete Permit",
+            f"Delete permit '{label}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        del self._permits[index]
+        self._refresh_permits_list()
+        self._persist_tracker_data()
         self._close_add_permit_form()
 
     def _refresh_clients_list(self) -> None:
-        lines: list[str] = []
-        for client in self._clients:
-            contact_bits = [part for part in (client.number, client.email) if part]
-            if contact_bits:
-                lines.append(f"{client.name} ({' | '.join(contact_bits)})")
-            else:
-                lines.append(client.name)
-        self._refresh_list_widget(self._clients_list_widget, lines, "No clients added yet.")
+        search_query = self._normalized_search_text(self._client_search_input)
+        filter_mode = self._current_filter_value(self._client_filter_combo)
+        rows: list[tuple[int, tuple[tuple[str, str], ...]]] = []
+        for index, client in enumerate(self._clients):
+            if not self._contact_matches_filter(client, filter_mode):
+                continue
+            searchable = f"{client.name} {client.number} {client.email}".lower()
+            if search_query and search_query not in searchable:
+                continue
+            number_text = client.number.strip() or "No number"
+            email_text = client.email.strip() or "No email"
+            rows.append(
+                (
+                    index,
+                    (
+                        ("client", client.name),
+                        ("number", number_text),
+                        ("email", email_text),
+                    ),
+                )
+            )
+
+        self._populate_list_widget(
+            self._clients_list_widget,
+            rows,
+            "No clients match current filters.",
+        )
+        self._set_result_label(
+            self._client_result_label,
+            shown=len(rows),
+            total=len(self._clients),
+            noun="clients",
+        )
 
     def _refresh_contractors_list(self) -> None:
-        lines: list[str] = []
-        for contractor in self._contractors:
-            contact_bits = [part for part in (contractor.number, contractor.email) if part]
-            if contact_bits:
-                lines.append(f"{contractor.name} ({' | '.join(contact_bits)})")
-            else:
-                lines.append(contractor.name)
-        self._refresh_list_widget(self._contractors_list_widget, lines, "No contractors added yet.")
+        search_query = self._normalized_search_text(self._contractor_search_input)
+        filter_mode = self._current_filter_value(self._contractor_filter_combo)
+        rows: list[tuple[int, tuple[tuple[str, str], ...]]] = []
+        for index, contractor in enumerate(self._contractors):
+            if not self._contact_matches_filter(contractor, filter_mode):
+                continue
+            searchable = f"{contractor.name} {contractor.number} {contractor.email}".lower()
+            if search_query and search_query not in searchable:
+                continue
+            number_text = contractor.number.strip() or "No number"
+            email_text = contractor.email.strip() or "No email"
+            rows.append(
+                (
+                    index,
+                    (
+                        ("contractor", contractor.name),
+                        ("number", number_text),
+                        ("email", email_text),
+                    ),
+                )
+            )
+
+        self._populate_list_widget(
+            self._contractors_list_widget,
+            rows,
+            "No contractors match current filters.",
+        )
+        self._set_result_label(
+            self._contractor_result_label,
+            shown=len(rows),
+            total=len(self._contractors),
+            noun="contractors",
+        )
 
     def _refresh_permits_list(self) -> None:
-        lines: list[str] = []
-        for permit in self._permits:
-            lines.append(
-                f"{permit.parcel_id} - {permit.address} | {permit.client_name} / {permit.contractor_name}"
+        search_query = self._normalized_search_text(self._permit_search_input)
+        filter_mode = self._current_filter_value(self._permit_filter_combo)
+        rows: list[tuple[int, tuple[tuple[str, str], ...]]] = []
+        for index, permit in enumerate(self._permits):
+            if not self._permit_matches_filter(permit, filter_mode):
+                continue
+            searchable = f"{permit.parcel_id} {permit.address} {permit.request_date}".lower()
+            if search_query and search_query not in searchable:
+                continue
+            parcel_text = permit.parcel_id.strip() or "No parcel ID"
+            address_text = permit.address.strip() or "No address"
+            request_text = permit.request_date.strip() or "No request date"
+            rows.append(
+                (
+                    index,
+                    (
+                        ("parcel", parcel_text),
+                        ("address", address_text),
+                        ("request", request_text),
+                    ),
+                )
             )
-        self._refresh_list_widget(self._permits_list_widget, lines, "No permits added yet.")
 
-    def _refresh_list_widget(self, widget: QListWidget | None, rows: list[str], empty_message: str) -> None:
+        self._populate_list_widget(
+            self._permits_list_widget,
+            rows,
+            "No permits match current filters.",
+        )
+        self._set_result_label(
+            self._permit_result_label,
+            shown=len(rows),
+            total=len(self._permits),
+            noun="permits",
+        )
+
+    def _populate_list_widget(
+        self,
+        widget: QListWidget | None,
+        rows: list[tuple[int, tuple[tuple[str, str], ...]]],
+        empty_message: str,
+    ) -> None:
         if widget is None:
             return
+        widget.blockSignals(True)
         widget.clear()
         if not rows:
-            widget.addItem(empty_message)
+            empty_item = QListWidgetItem(empty_message)
+            empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
+            widget.addItem(empty_item)
+            widget.blockSignals(False)
             return
-        for row in rows:
-            widget.addItem(row)
+        for source_index, fields in rows:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, source_index)
+            item.setData(Qt.ItemDataRole.DisplayRole, "")
+            widget.addItem(item)
+            card = self._build_tracker_list_card(fields, widget)
+            item.setSizeHint(card.sizeHint())
+            widget.setItemWidget(item, card)
+        widget.blockSignals(False)
+        self._refresh_list_selection_visuals(widget)
+
+    def _build_tracker_list_card(
+        self,
+        fields: tuple[tuple[str, str], ...],
+        parent: QWidget,
+    ) -> QFrame:
+        card = QFrame(parent)
+        card.setObjectName("TrackerListCard")
+        card.setProperty("selected", "false")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 9, 10, 9)
+        card_layout.setSpacing(6)
+
+        for field_name, value in fields:
+            row = QWidget(card)
+            row.setObjectName("TrackerListFieldRow")
+            row.setProperty("field", field_name)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(7)
+
+            dot = QFrame(row)
+            dot.setObjectName("TrackerListDot")
+            dot.setProperty("field", field_name)
+            dot.setFixedSize(8, 8)
+            dot.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+            field_label = QLabel(self._display_label_for_field(field_name), row)
+            field_label.setObjectName("TrackerListFieldLabel")
+            field_label.setProperty("field", field_name)
+
+            value_label = QLabel(value, row)
+            value_label.setObjectName("TrackerListFieldValue")
+            value_label.setProperty("field", field_name)
+            value_label.setWordWrap(True)
+
+            row_layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+            row_layout.addWidget(field_label, 0, Qt.AlignmentFlag.AlignVCenter)
+            row_layout.addWidget(value_label, 1, Qt.AlignmentFlag.AlignVCenter)
+            card_layout.addWidget(row)
+
+        return card
+
+    def _display_label_for_field(self, field_name: str) -> str:
+        labels = {
+            "client": "Client",
+            "contractor": "Contractor",
+            "email": "Email",
+            "number": "Number",
+            "address": "Address",
+            "parcel": "Parcel ID",
+            "request": "Request Date",
+        }
+        return labels.get(field_name, field_name.strip().title())
+
+    def _refresh_list_selection_visuals(self, widget: QListWidget | None) -> None:
+        if widget is None:
+            return
+        for index in range(widget.count()):
+            item = widget.item(index)
+            if item is None:
+                continue
+            card = widget.itemWidget(item)
+            if card is None:
+                continue
+            selected_flag = "true" if item.isSelected() else "false"
+            if card.property("selected") == selected_flag:
+                continue
+            card.setProperty("selected", selected_flag)
+            style = card.style()
+            style.unpolish(card)
+            style.polish(card)
+            card.update()
+
+    def _extract_item_index(self, item: QListWidgetItem) -> int:
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data is None:
+            return -1
+        try:
+            return int(data)
+        except Exception:
+            return -1
+
+    def _normalized_search_text(self, widget: QLineEdit | None) -> str:
+        if widget is None:
+            return ""
+        return widget.text().strip().lower()
+
+    def _current_filter_value(self, combo: QComboBox | None) -> str:
+        if combo is None:
+            return "all"
+        value = str(combo.currentData() or "").strip().lower()
+        return value or "all"
+
+    def _contact_matches_filter(self, record: ContactRecord, filter_mode: str) -> bool:
+        has_email = bool(record.email.strip())
+        has_number = bool(record.number.strip())
+        if filter_mode == "email":
+            return has_email
+        if filter_mode == "number":
+            return has_number
+        if filter_mode == "missing_contact":
+            return not (has_email and has_number)
+        return True
+
+    def _permit_matches_filter(self, record: PermitRecord, filter_mode: str) -> bool:
+        has_request = bool(record.request_date.strip())
+        has_application = bool(record.application_date.strip())
+        has_completion = bool(record.completion_date.strip())
+        if filter_mode == "requested":
+            return has_request
+        if filter_mode == "applied":
+            return has_application
+        if filter_mode == "completed":
+            return has_completion
+        if filter_mode == "open":
+            return not has_completion
+        return True
+
+    def _set_result_label(self, label: QLabel | None, *, shown: int, total: int, noun: str) -> None:
+        if label is None:
+            return
+        if total <= 0:
+            label.setText(f"0 {noun}")
+            return
+        label.setText(f"{shown} of {total} {noun}")
+
+    def _set_combo_selected_value(self, combo: QComboBox | None, value: str) -> None:
+        if combo is None:
+            return
+        target = value.strip()
+        if not target:
+            return
+        index = combo.findData(target)
+        if index < 0:
+            index = combo.findText(target)
+        if index >= 0:
+            combo.setCurrentIndex(index)
 
     def _refresh_party_selectors(self) -> None:
         self._refresh_contact_combo(
             self._permit_client_combo,
             self._clients,
-            "Add a client first",
+            "No clients yet",
         )
         self._refresh_contact_combo(
             self._permit_contractor_combo,
             self._contractors,
-            "Add a contractor first",
+            "No contractors yet",
         )
 
     def _refresh_contact_combo(
@@ -584,20 +1352,228 @@ class ErPermitSysWindow(FramelessWindow):
         selected_name = str(combo.currentData() or "").strip()
         combo.blockSignals(True)
         combo.clear()
-        if not rows:
-            combo.addItem(empty_message, "")
-            combo.setEnabled(False)
-            combo.blockSignals(False)
-            return
+
+        none_label = "None"
+        if not rows and empty_message.strip():
+            none_label = f"None ({empty_message.strip()})"
+        combo.addItem(none_label, "")
 
         for row in rows:
             combo.addItem(row.name, row.name)
         combo.setEnabled(True)
-        if selected_name:
-            selected_index = combo.findData(selected_name)
-            if selected_index >= 0:
-                combo.setCurrentIndex(selected_index)
+        selected_index = combo.findData(selected_name) if selected_name else -1
+        if selected_index >= 0:
+            combo.setCurrentIndex(selected_index)
+        else:
+            combo.setCurrentIndex(0)
         combo.blockSignals(False)
+
+    def _initialize_data_store(self) -> str:
+        warning_lines: list[str] = []
+
+        configured_backend = str(self._data_storage_backend or "").strip().lower()
+        if configured_backend == BACKEND_SUPABASE:
+            warning_lines.append(
+                "Supabase data storage is not enabled yet. Using local JSON storage."
+            )
+            self._data_storage_backend = BACKEND_LOCAL_JSON
+        elif configured_backend != BACKEND_LOCAL_JSON:
+            self._data_storage_backend = BACKEND_LOCAL_JSON
+        if self._data_storage_backend != configured_backend:
+            save_data_storage_backend(self._data_storage_backend)
+
+        configured_folder = self._data_storage_folder
+        self._data_storage_folder = normalize_data_storage_folder(configured_folder)
+        if self._data_storage_folder != configured_folder:
+            save_data_storage_folder(self._data_storage_folder)
+        self._data_store = LocalJsonDataStore(self._data_storage_folder)
+
+        load_result = self._data_store.load_bundle()
+        self._apply_tracker_bundle(load_result.bundle, refresh_ui=False)
+        if load_result.warning:
+            warning_lines.append(load_result.warning)
+
+        self._state_streamer.record(
+            "data.loaded",
+            source="main_window",
+            payload={
+                "backend": self._data_storage_backend,
+                "folder": str(self._data_storage_folder),
+                "source": load_result.source,
+                "clients": len(self._clients),
+                "contractors": len(self._contractors),
+                "permits": len(self._permits),
+            },
+        )
+
+        return "\n\n".join(line for line in warning_lines if line.strip())
+
+    def _snapshot_tracker_bundle(self) -> TrackerDataBundle:
+        return TrackerDataBundle(
+            clients=[
+                ContactRecord(
+                    name=record.name,
+                    number=record.number,
+                    email=record.email,
+                )
+                for record in self._clients
+            ],
+            contractors=[
+                ContactRecord(
+                    name=record.name,
+                    number=record.number,
+                    email=record.email,
+                )
+                for record in self._contractors
+            ],
+            permits=[
+                PermitRecord(
+                    parcel_id=record.parcel_id,
+                    address=record.address,
+                    request_date=record.request_date,
+                    application_date=record.application_date,
+                    completion_date=record.completion_date,
+                    client_name=record.client_name,
+                    contractor_name=record.contractor_name,
+                )
+                for record in self._permits
+            ],
+        )
+
+    def _apply_tracker_bundle(self, bundle: TrackerDataBundle, *, refresh_ui: bool) -> None:
+        cloned_bundle = bundle.clone()
+        self._clients = list(cloned_bundle.clients)
+        self._contractors = list(cloned_bundle.contractors)
+        self._permits = list(cloned_bundle.permits)
+
+        if not refresh_ui:
+            return
+
+        self._refresh_clients_list()
+        self._refresh_contractors_list()
+        self._refresh_permits_list()
+        self._refresh_party_selectors()
+
+    def _persist_tracker_data(self, *, show_error_dialog: bool = True) -> bool:
+        bundle = self._snapshot_tracker_bundle()
+        try:
+            self._data_store.save_bundle(bundle)
+        except Exception as exc:
+            if show_error_dialog:
+                QMessageBox.warning(
+                    self,
+                    "Storage Error",
+                    f"Could not save local data.\n\n{exc}",
+                )
+            self._state_streamer.record(
+                "data.save_failed",
+                source="main_window",
+                payload={
+                    "backend": self._data_storage_backend,
+                    "folder": str(self._data_storage_folder),
+                    "error": str(exc),
+                },
+            )
+            return False
+
+        self._state_streamer.record(
+            "data.saved",
+            source="main_window",
+            payload={
+                "backend": self._data_storage_backend,
+                "folder": str(self._data_storage_folder),
+                "path": str(self._data_store.storage_file_path),
+                "clients": len(self._clients),
+                "contractors": len(self._contractors),
+                "permits": len(self._permits),
+            },
+        )
+        return True
+
+    def _on_data_storage_folder_changed(self, requested_folder: str) -> str:
+        target_folder = normalize_data_storage_folder(requested_folder)
+        if target_folder == self._data_storage_folder:
+            return str(self._data_storage_folder)
+
+        target_store = LocalJsonDataStore(target_folder)
+        loaded_existing = False
+        warning_message = ""
+
+        try:
+            if target_store.has_saved_data():
+                load_result = target_store.load_bundle()
+                if load_result.source == "empty" and load_result.warning:
+                    raise RuntimeError(
+                        "The selected folder contains unreadable data. "
+                        "Choose a different folder or repair the data file first."
+                    )
+                target_bundle = load_result.bundle
+                warning_message = load_result.warning
+                loaded_existing = True
+            else:
+                target_bundle = TrackerDataBundle()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Storage Folder Error",
+                f"Could not switch storage folder.\n\n{exc}",
+            )
+            self._state_streamer.record(
+                "data.folder_switch_failed",
+                source="main_window",
+                payload={
+                    "from": str(self._data_storage_folder),
+                    "to": str(target_folder),
+                    "error": str(exc),
+                },
+            )
+            return str(self._data_storage_folder)
+
+        self._data_store = target_store
+        self._data_storage_backend = BACKEND_LOCAL_JSON
+        self._data_storage_folder = target_store.data_root
+        save_data_storage_backend(self._data_storage_backend)
+        save_data_storage_folder(self._data_storage_folder)
+
+        self._close_to_home_view()
+        self._apply_tracker_bundle(target_bundle, refresh_ui=True)
+
+        self._state_streamer.record(
+            "data.folder_switched",
+            source="main_window",
+            payload={
+                "backend": self._data_storage_backend,
+                "folder": str(self._data_storage_folder),
+                "loaded_existing": loaded_existing,
+                "clients": len(self._clients),
+                "contractors": len(self._contractors),
+                "permits": len(self._permits),
+            },
+        )
+
+        if warning_message:
+            self._show_data_storage_warning(warning_message)
+        elif loaded_existing:
+            QMessageBox.information(
+                self,
+                "Storage Folder Updated",
+                f"Loaded existing data from:\n{self._data_storage_folder}",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Storage Folder Updated",
+                f"No saved data found in:\n{self._data_storage_folder}\n\n"
+                "The panels were reset to empty for this folder.",
+            )
+
+        return str(self._data_storage_folder)
+
+    def _show_data_storage_warning(self, message: str) -> None:
+        text = message.strip()
+        if not text:
+            return
+        QMessageBox.warning(self, "Data Storage Notice", text)
 
     def set_command_runtime(self, runtime: CommandRuntime) -> None:
         self._command_runtime = runtime
@@ -630,6 +1606,8 @@ class ErPermitSysWindow(FramelessWindow):
                 palette_shortcut_enabled=self._palette_shortcut_enabled,
                 palette_shortcut_keybind=self._palette_shortcut_keybind,
                 on_palette_shortcut_changed=self._on_palette_shortcut_changed,
+                data_storage_folder=str(self._data_storage_folder),
+                on_data_storage_folder_changed=self._on_data_storage_folder_changed,
             )
             dialog.setModal(False)
             dialog.setWindowModality(Qt.WindowModality.NonModal)
@@ -692,6 +1670,7 @@ class ErPermitSysWindow(FramelessWindow):
         QTimer.singleShot(0, self._sync_foreground_layout)
 
     def closeEvent(self, event) -> None:
+        self._persist_tracker_data(show_error_dialog=False)
         dialog = self._settings_dialog
         if dialog is not None:
             dialog.close()
@@ -861,21 +1840,16 @@ class ErPermitSysWindow(FramelessWindow):
         if scene_width <= 0 or scene_height <= 0:
             return
 
-        horizontal_margin = 48
-        vertical_margin = 60
-        viewing_permit_form = (
-            self._panel_stack is not None
-            and self._permit_form_view is not None
-            and self._panel_stack.currentWidget() is self._permit_form_view
-        )
-        if viewing_permit_form:
-            desired_width = min(760, max(460, scene_width - 80))
-            desired_height = min(520, max(320, scene_height - 90))
+        current_view = self._panel_stack.currentWidget() if self._panel_stack is not None else None
+        home_view_active = self._panel_home_view is not None and current_view is self._panel_home_view
+        if home_view_active:
+            desired_width = max(380, int(scene_width * 0.94))
+            desired_height = max(240, int(scene_height * 0.78))
         else:
-            desired_width = min(1080, max(360, scene_width - (horizontal_margin * 2)))
-            desired_height = min(400, max(220, scene_height - (vertical_margin * 2)))
-        content_width = min(desired_width, scene_width)
-        content_height = min(desired_height, scene_height)
+            desired_width = max(460, int(scene_width * 0.84))
+            desired_height = max(320, int(scene_height * 0.84))
+        content_width = min(desired_width, max(1, scene_width - 12))
+        content_height = min(desired_height, max(1, scene_height - 12))
 
         x = max(0, int((scene_width - content_width) / 2))
         y = max(0, int((scene_height - content_height) / 2))

@@ -69,14 +69,97 @@ QPushButton#TrackerPanelActionButton {
     padding: 8px 12px;
 }
 
+QLineEdit#TrackerPanelSearch,
+QComboBox#TrackerPanelFilter {
+    border-radius: 8px;
+    min-height: 30px;
+}
+
+QLineEdit#TrackerPanelSearch {
+    padding: 7px 10px;
+}
+
+QComboBox#TrackerPanelFilter {
+    padding: 6px 24px 6px 10px;
+    min-width: 128px;
+}
+
+QLabel#TrackerPanelMeta {
+    font-size: 11px;
+    font-weight: 620;
+    letter-spacing: 0.25px;
+}
+
 QListWidget#TrackerPanelList {
     border-radius: 10px;
-    padding: 6px;
+    padding: 8px;
     outline: none;
 }
 
 QListWidget#TrackerPanelList::item {
-    padding: 5px 4px;
+    margin: 4px 2px;
+    padding: 1px 0px;
+    border: none;
+    background: transparent;
+}
+
+QListWidget#TrackerPanelList::item:hover {
+    border: none;
+    background: transparent;
+}
+
+QListWidget#TrackerPanelList::item:selected {
+    border: none;
+    background: transparent;
+}
+
+QFrame#TrackerListCard {
+    border-radius: 10px;
+    border: 1px solid transparent;
+}
+
+QFrame#TrackerListCard[selected="true"] {
+    border-width: 1px;
+}
+
+QWidget#TrackerListFieldRow {
+    background: transparent;
+}
+
+QFrame#TrackerListDot {
+    border-radius: 4px;
+}
+
+QLabel#TrackerListFieldLabel {
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 74px;
+    letter-spacing: 0.6px;
+}
+
+QLabel#TrackerListFieldValue {
+    font-size: 12px;
+    font-weight: 550;
+}
+
+QLabel#TrackerListFieldValue[field="client"],
+QLabel#TrackerListFieldValue[field="contractor"],
+QLabel#TrackerListFieldValue[field="parcel"] {
+    font-size: 14px;
+    font-weight: 760;
+    letter-spacing: 0.2px;
+}
+
+QLabel#TrackerListFieldValue[field="address"] {
+    font-size: 12px;
+    font-weight: 620;
+}
+
+QLabel#TrackerListFieldValue[field="email"],
+QLabel#TrackerListFieldValue[field="number"],
+QLabel#TrackerListFieldValue[field="request"] {
+    font-size: 11px;
+    font-weight: 540;
 }
 
 QWidget#PermitFormView {
@@ -102,6 +185,13 @@ QComboBox#PermitFormCombo {
 
 QPushButton#PermitFormSecondaryButton,
 QPushButton#PermitFormPrimaryButton {
+    font-size: 12px;
+    font-weight: 650;
+    border-radius: 8px;
+    padding: 8px 14px;
+}
+
+QPushButton#PermitFormDangerButton {
     font-size: 12px;
     font-weight: 650;
     border-radius: 8px;

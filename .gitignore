@@ -17,6 +17,20 @@ venv/
 # Optional local-only config overlays
 config/local/
 config/**/*.local.json
+config/settings.json
+config/plugins/space/settings.json
+
+# Local runtime data and app state
+data/
+data*/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.tmp
+*.bak
 
 # OS noise
 .DS_Store

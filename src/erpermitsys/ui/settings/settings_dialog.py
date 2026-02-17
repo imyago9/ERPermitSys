@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,6 +30,7 @@ class SettingsDialog(FramelessDialog):
     plugins_changed = Signal()
     dark_mode_changed = Signal(bool)
     palette_shortcut_changed = Signal(bool, str)
+    data_storage_folder_changed = Signal(str)
 
     def __init__(
         self,
@@ -40,6 +42,8 @@ class SettingsDialog(FramelessDialog):
         palette_shortcut_enabled: bool = True,
         palette_shortcut_keybind: str = "Ctrl+Space",
         on_palette_shortcut_changed: Callable[[bool, str], None] | None = None,
+        data_storage_folder: str = "",
+        on_data_storage_folder_changed: Callable[[str], str] | None = None,
     ) -> None:
         super().__init__(
             title="Settings",
@@ -54,6 +58,12 @@ class SettingsDialog(FramelessDialog):
             palette_shortcut_keybind.strip() if isinstance(palette_shortcut_keybind, str) else ""
         ) or "Ctrl+Space"
         self._on_palette_shortcut_changed = on_palette_shortcut_changed
+        self._data_storage_folder = (
+            data_storage_folder.strip()
+            if isinstance(data_storage_folder, str)
+            else ""
+        )
+        self._on_data_storage_folder_changed = on_data_storage_folder_changed
         self._refreshing = False
         self._plugin_cache: tuple[DiscoveredPlugin, ...] = ()
 
@@ -138,6 +148,41 @@ class SettingsDialog(FramelessDialog):
         )
         general_layout.addLayout(palette_keybind_row)
         self._sync_palette_shortcut_controls()
+
+        data_folder_label = QLabel("Data folder", general_card)
+        data_folder_label.setObjectName("PluginGeneralLabel")
+        general_layout.addWidget(data_folder_label)
+
+        data_folder_row = QHBoxLayout()
+        data_folder_row.setContentsMargins(0, 0, 0, 0)
+        data_folder_row.setSpacing(8)
+
+        self._data_storage_folder_input = QLineEdit(general_card)
+        self._data_storage_folder_input.setObjectName("PluginPickerSearch")
+        self._data_storage_folder_input.setReadOnly(True)
+        self._data_storage_folder_input.setPlaceholderText("Choose local data folder")
+        data_folder_row.addWidget(self._data_storage_folder_input, 1)
+
+        self._browse_data_folder_button = QPushButton("Browse...", general_card)
+        self._browse_data_folder_button.setObjectName("PluginPickerButton")
+        self._browse_data_folder_button.clicked.connect(self._on_browse_data_folder_clicked)
+        data_folder_row.addWidget(self._browse_data_folder_button, 0)
+
+        self._default_data_folder_button = QPushButton("Default", general_card)
+        self._default_data_folder_button.setObjectName("PluginPickerButton")
+        self._default_data_folder_button.clicked.connect(self._on_default_data_folder_clicked)
+        data_folder_row.addWidget(self._default_data_folder_button, 0)
+
+        general_layout.addLayout(data_folder_row)
+
+        backend_hint = QLabel(
+            "Data backend: Local JSON (architecture is ready for future Supabase integration).",
+            general_card,
+        )
+        backend_hint.setObjectName("PluginPickerStatus")
+        backend_hint.setWordWrap(True)
+        general_layout.addWidget(backend_hint)
+        self._set_data_storage_folder_display(self._data_storage_folder)
 
         top_controls = QHBoxLayout()
         top_controls.setContentsMargins(0, 0, 0, 0)
@@ -412,6 +457,45 @@ class SettingsDialog(FramelessDialog):
         if callable(self._on_palette_shortcut_changed):
             self._on_palette_shortcut_changed(enabled, keybind)
         self.palette_shortcut_changed.emit(enabled, keybind)
+
+    def _set_data_storage_folder_display(self, folder: str) -> None:
+        text = folder.strip() if isinstance(folder, str) else ""
+        self._data_storage_folder = text
+        self._data_storage_folder_input.setText(text)
+        self._data_storage_folder_input.setCursorPosition(0)
+
+    def _on_browse_data_folder_clicked(self) -> None:
+        start_dir = self._data_storage_folder or ""
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Choose Local Data Folder",
+            start_dir,
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if not selected:
+            return
+        self._apply_data_storage_folder_change(selected)
+
+    def _on_default_data_folder_clicked(self) -> None:
+        self._apply_data_storage_folder_change("")
+
+    def _apply_data_storage_folder_change(self, requested_folder: str) -> None:
+        requested = requested_folder.strip() if isinstance(requested_folder, str) else ""
+        applied = requested
+        if callable(self._on_data_storage_folder_changed):
+            try:
+                callback_value = self._on_data_storage_folder_changed(requested)
+            except Exception as exc:
+                self._set_status(f"Data folder update failed: {exc}")
+                return
+            if isinstance(callback_value, str) and callback_value.strip():
+                applied = callback_value.strip()
+        self._set_data_storage_folder_display(applied)
+        if applied:
+            self._set_status(f"Data folder: {applied}")
+        else:
+            self._set_status("Data folder updated.")
+        self.data_storage_folder_changed.emit(applied)
 
     def _refresh_kind_filter_options(self) -> None:
         selected = self._kind_filter.currentData()
