@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Mapping, Sequence
 
+from erpermitsys.app.runtime_paths import app_path, bundled_path
 from erpermitsys.plugins.discovery import discover_plugins
 from erpermitsys.plugins.manifest import DiscoveredPlugin
 
@@ -106,11 +107,21 @@ class PluginManager:
         logger: logging.Logger | None = None,
         kind_policies: Sequence[PluginKindPolicy] | None = None,
     ) -> "PluginManager":
-        root = Path(rewrite_root) if rewrite_root else Path(__file__).resolve().parents[3]
-        plugin_root = root / "plugins"
-        data_root = root / "config" / "plugins"
+        plugin_roots: list[Path]
+        if rewrite_root is not None:
+            root = Path(rewrite_root)
+            plugin_roots = [root / "plugins"]
+        else:
+            plugin_roots = []
+            bundled_plugins = bundled_path("plugins")
+            app_plugins = app_path("plugins")
+            for candidate in (bundled_plugins, app_plugins):
+                if candidate not in plugin_roots:
+                    plugin_roots.append(candidate)
+
+        data_root = app_path("config", "plugins")
         return cls(
-            plugin_roots=[plugin_root],
+            plugin_roots=plugin_roots,
             data_root=data_root,
             logger=logger,
             kind_policies=kind_policies,

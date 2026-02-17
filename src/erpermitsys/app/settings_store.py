@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any
 from typing import Iterable
 
+from erpermitsys.app.runtime_paths import app_root
 
-_REWRITE_ROOT = Path(__file__).resolve().parents[3]
+_REWRITE_ROOT = app_root()
 _SETTINGS_PATH = _REWRITE_ROOT / "config" / "settings.json"
 _DARK_MODE_KEY = "darkMode"
 _PALETTE_ENABLED_KEY = "paletteShortcutEnabled"

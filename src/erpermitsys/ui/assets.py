@@ -4,9 +4,20 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from erpermitsys.app.runtime_paths import app_root, bundle_root
 
-_REWRITE_ROOT = Path(__file__).resolve().parents[3]
-_ASSETS_DIR = _REWRITE_ROOT / "assets"
+
+def _resolve_assets_dir() -> Path:
+    bundled = bundle_root() / "assets"
+    if bundled.exists():
+        return bundled
+    fallback = app_root() / "assets"
+    if fallback.exists():
+        return fallback
+    return bundled
+
+
+_ASSETS_DIR = _resolve_assets_dir()
 
 
 def asset_path(*parts: str) -> str:

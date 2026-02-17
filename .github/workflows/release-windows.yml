@@ -66,6 +66,7 @@ jobs:
           pyinstaller --noconfirm --clean --windowed \
             --name erpermitsys \
             --paths src \
+            --add-data "src/erpermitsys/ui/theme;erpermitsys/ui/theme" \
             --add-data "assets;assets" \
             --add-data "plugins;plugins" \
             --add-data "config;config" \
