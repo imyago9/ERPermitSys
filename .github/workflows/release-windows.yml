@@ -1,0 +1,50 @@
+name: Release Windows Build
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build app (PyInstaller onedir)
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --windowed \
+            --name erpermitsys \
+            --paths src \
+            --add-data "assets;assets" \
+            --add-data "plugins;plugins" \
+            --add-data "config;config" \
+            run.py
+
+      - name: Package zip asset
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/erpermitsys/*" -DestinationPath "dist/erpermitsys-windows.zip" -Force
+
+      - name: Publish GitHub release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/erpermitsys-windows.zip
+          generate_release_notes: true

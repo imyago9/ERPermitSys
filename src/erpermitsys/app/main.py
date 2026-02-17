@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 from typing import Sequence
 from uuid import uuid4
@@ -69,6 +70,15 @@ from erpermitsys.app.tracker_models import (
     PermitRecord,
     TrackerDataBundle,
 )
+from erpermitsys.app.updater import (
+    GitHubReleaseUpdater,
+    GitHubUpdateCheckResult,
+    GitHubUpdateInfo,
+    can_self_update_windows,
+    is_packaged_runtime,
+    launch_windows_zip_updater,
+)
+from erpermitsys.version import APP_VERSION, GITHUB_RELEASE_ASSET_NAME, GITHUB_RELEASE_REPO
 from erpermitsys.ui.assets import icon_asset_path
 from erpermitsys.ui.settings import SettingsDialog
 from erpermitsys.ui.theme import apply_app_theme
@@ -83,6 +93,7 @@ _PERMIT_CATEGORY_LABELS: dict[str, str] = {
     "demolition": "Demolition",
 }
 _DEFAULT_DOCUMENT_FOLDER_NAME = "General"
+_UPDATE_STARTUP_DELAY_MS = 1800
 
 
 class ErPermitSysWindow(FramelessWindow):
@@ -118,6 +129,11 @@ class ErPermitSysWindow(FramelessWindow):
         self._data_storage_folder = load_data_storage_folder()
         self._data_store = LocalJsonDataStore(self._data_storage_folder)
         self._document_store = LocalPermitDocumentStore(self._data_storage_folder)
+        self._app_version = APP_VERSION
+        self._auto_update_github_repo = GITHUB_RELEASE_REPO
+        self._auto_update_asset_name = GITHUB_RELEASE_ASSET_NAME
+        self._updater = GitHubReleaseUpdater(timeout_seconds=3.5)
+        self._update_check_in_progress = False
 
         self._clients: list[ContactRecord] = []
         self._contractors: list[ContactRecord] = []
@@ -239,6 +255,7 @@ class ErPermitSysWindow(FramelessWindow):
         if storage_warning:
             QTimer.singleShot(0, lambda message=storage_warning: self._show_data_storage_warning(message))
         QTimer.singleShot(0, self._sync_foreground_layout)
+        QTimer.singleShot(_UPDATE_STARTUP_DELAY_MS, self._check_for_updates_on_startup)
         self._state_streamer.record(
             "window.initialized",
             source="main_window",
@@ -3602,6 +3619,226 @@ class ErPermitSysWindow(FramelessWindow):
             return
         self._show_warning_dialog("Data Storage Notice", text)
 
+    def _check_for_updates_on_startup(self) -> None:
+        if not self._auto_update_github_repo:
+            return
+        self._check_for_updates(manual=False)
+
+    def _set_update_settings_status(self, text: str, *, checking: bool) -> None:
+        dialog = self._settings_dialog
+        if dialog is None:
+            return
+        dialog.set_update_status(text)
+        dialog.set_update_check_running(checking)
+
+    def _on_check_updates_requested(self) -> None:
+        self._check_for_updates(manual=True)
+
+    def _check_for_updates(self, *, manual: bool) -> None:
+        if self._update_check_in_progress:
+            if manual:
+                self._show_info_dialog(
+                    "Update Check",
+                    "An update check is already in progress.",
+                )
+            return
+
+        if not self._auto_update_github_repo:
+            self._set_update_settings_status("Update source is not configured in this build.", checking=False)
+            if manual:
+                self._show_warning_dialog(
+                    "Repository Required",
+                    "This build does not define an update source.\n\n"
+                    "Set GITHUB_RELEASE_REPO in src/erpermitsys/version.py and rebuild.",
+                )
+            return
+
+        self._update_check_in_progress = True
+        self._set_update_settings_status("Checking for updates...", checking=True)
+        self._state_streamer.record(
+            "updates.check_started",
+            source="main_window",
+            payload={
+                "manual": manual,
+                "repo": self._auto_update_github_repo,
+                "asset_name": self._auto_update_asset_name,
+            },
+        )
+
+        app = QApplication.instance()
+        if app is not None:
+            app.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+        try:
+            result = self._updater.check_for_update(
+                repo=self._auto_update_github_repo,
+                current_version=self._app_version,
+                asset_name=self._auto_update_asset_name,
+            )
+        finally:
+            self._update_check_in_progress = False
+            if app is not None and app.overrideCursor() is not None:
+                app.restoreOverrideCursor()
+
+        self._handle_update_check_result(result, manual=manual)
+
+    def _handle_update_check_result(self, result: GitHubUpdateCheckResult, *, manual: bool) -> None:
+        message = result.message.strip()
+        status = result.status
+        info = result.info
+
+        if status == "update_available" and info is not None:
+            self._set_update_settings_status(
+                f"Update available: v{info.latest_version}.",
+                checking=False,
+            )
+            self._state_streamer.record(
+                "updates.available",
+                source="main_window",
+                payload={
+                    "current_version": info.current_version,
+                    "latest_version": info.latest_version,
+                    "repo": info.repo,
+                    "asset": info.asset.name if info.asset is not None else "",
+                },
+            )
+            confirm = self._confirm_dialog(
+                "Update Available",
+                self._format_update_confirmation_message(info),
+                confirm_text="Update Now",
+                cancel_text="Later",
+            )
+            if confirm:
+                self._download_and_apply_update(info)
+            else:
+                self._set_update_settings_status("Update postponed.", checking=False)
+            return
+
+        if status == "up_to_date":
+            self._set_update_settings_status(message or "You are on the latest version.", checking=False)
+            if manual:
+                self._show_info_dialog("Update Check", message or "You are on the latest version.")
+            return
+
+        if status in ("not_configured", "no_release", "no_compatible_asset"):
+            self._set_update_settings_status(message, checking=False)
+            if manual:
+                self._show_warning_dialog("Update Check", message)
+            return
+
+        self._set_update_settings_status(message or "Update check failed.", checking=False)
+        if manual:
+            self._show_warning_dialog("Update Check Failed", message or "Unknown update error.")
+
+    def _format_update_confirmation_message(self, info: GitHubUpdateInfo) -> str:
+        lines: list[str] = [
+            f"A new version is available.",
+            f"",
+            f"Current: v{info.current_version}",
+            f"Latest: v{info.latest_version}",
+        ]
+        if info.published_at:
+            lines.append(f"Published: {info.published_at}")
+        if info.asset is not None:
+            lines.append(f"Asset: {info.asset.name}")
+        lines.append("")
+        notes = info.notes.strip()
+        if notes:
+            compact_notes = " ".join(notes.split())
+            if len(compact_notes) > 260:
+                compact_notes = f"{compact_notes[:257]}..."
+            lines.append(f"Release notes: {compact_notes}")
+            lines.append("")
+        lines.append("Install this update now?")
+        return "\n".join(lines)
+
+    def _download_and_apply_update(self, info: GitHubUpdateInfo) -> None:
+        asset = info.asset
+        if asset is None:
+            self._show_warning_dialog(
+                "Update Download Missing",
+                "This release does not include a downloadable asset.",
+            )
+            self._set_update_settings_status("Release asset missing.", checking=False)
+            return
+
+        self._set_update_settings_status(
+            f"Downloading {asset.name}...",
+            checking=True,
+        )
+
+        app = QApplication.instance()
+        if app is not None:
+            app.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+        try:
+            temp_root = Path(tempfile.mkdtemp(prefix="erpermitsys_update_"))
+            archive_path = temp_root / asset.name
+            downloaded_file = self._updater.download_asset(asset=asset, destination=archive_path)
+        except Exception as exc:
+            self._set_update_settings_status("Download failed.", checking=False)
+            self._show_warning_dialog(
+                "Update Download Failed",
+                f"Could not download update:\n\n{exc}",
+            )
+            return
+        finally:
+            if app is not None and app.overrideCursor() is not None:
+                app.restoreOverrideCursor()
+
+        self._set_update_settings_status("Update downloaded.", checking=False)
+        self._state_streamer.record(
+            "updates.downloaded",
+            source="main_window",
+            payload={
+                "latest_version": info.latest_version,
+                "file": str(downloaded_file),
+                "asset": asset.name,
+            },
+        )
+
+        is_zip = downloaded_file.name.lower().endswith(".zip")
+        if can_self_update_windows() and is_zip:
+            started, error = launch_windows_zip_updater(
+                archive_path=downloaded_file,
+                app_pid=int(QApplication.applicationPid()),
+                target_dir=Path(sys.executable).resolve().parent,
+                executable_path=Path(sys.executable).resolve(),
+            )
+            if not started:
+                self._set_update_settings_status("Installer launch failed.", checking=False)
+                self._show_warning_dialog(
+                    "Update Install Failed",
+                    error or "Could not launch update installer.",
+                )
+                return
+
+            self._set_update_settings_status("Installing update and restarting...", checking=False)
+            self._show_info_dialog(
+                "Installing Update",
+                "The update installer was launched.\n\n"
+                "The app will close now and restart after files are replaced.",
+            )
+            self.close()
+            return
+
+        if info.release_url:
+            QDesktopServices.openUrl(QUrl(info.release_url))
+
+        if is_packaged_runtime():
+            guidance = (
+                f"Update downloaded to:\n{downloaded_file}\n\n"
+                "Automatic install is currently supported for Windows .zip release assets only.\n"
+                "Please install this release manually."
+            )
+        else:
+            guidance = (
+                f"Update downloaded to:\n{downloaded_file}\n\n"
+                "You are running from source, so auto-replace is skipped.\n"
+                "Use the GitHub release page to deploy your next build."
+            )
+        self._show_info_dialog("Manual Update Required", guidance)
+
     def set_command_runtime(self, runtime: CommandRuntime) -> None:
         self._command_runtime = runtime
         runtime.configure_shortcut(
@@ -3635,6 +3872,8 @@ class ErPermitSysWindow(FramelessWindow):
                 on_palette_shortcut_changed=self._on_palette_shortcut_changed,
                 data_storage_folder=str(self._data_storage_folder),
                 on_data_storage_folder_changed=self._on_data_storage_folder_changed,
+                app_version=self._app_version,
+                on_check_updates_requested=self._on_check_updates_requested,
             )
             dialog.setModal(False)
             dialog.setWindowModality(Qt.WindowModality.NonModal)
@@ -3644,6 +3883,9 @@ class ErPermitSysWindow(FramelessWindow):
 
         mode = "dark" if self._dark_mode_enabled else "light"
         dialog.set_theme_mode(mode)
+        dialog.set_update_check_running(False)
+        source = self._auto_update_github_repo or "not configured"
+        dialog.set_update_status(f"Current version: {self._app_version} • Source: {source}")
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
@@ -3946,6 +4188,7 @@ def run(argv: Sequence[str] | None = None) -> int:
 
     app.setApplicationName("erpermitsys")
     app.setOrganizationName("Bellboard")
+    app.setApplicationVersion(APP_VERSION)
 
     state_streamer = StateStreamer()
     dark_mode_enabled = load_dark_mode(default=False)
@@ -3958,7 +4201,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     state_streamer.record(
         "app.started",
         source="app.main",
-        payload={"theme_mode": theme_mode},
+        payload={"theme_mode": theme_mode, "app_version": APP_VERSION},
     )
 
     window = ErPermitSysWindow(
@@ -3985,6 +4228,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         data={
             "window_title": window.windowTitle(),
             "theme_mode": theme_mode,
+            "app_version": APP_VERSION,
         },
     )
     window.show()

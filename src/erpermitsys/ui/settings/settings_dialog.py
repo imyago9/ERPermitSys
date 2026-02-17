@@ -31,6 +31,7 @@ class SettingsDialog(FramelessDialog):
     dark_mode_changed = Signal(bool)
     palette_shortcut_changed = Signal(bool, str)
     data_storage_folder_changed = Signal(str)
+    check_updates_requested = Signal()
 
     def __init__(
         self,
@@ -44,6 +45,8 @@ class SettingsDialog(FramelessDialog):
         on_palette_shortcut_changed: Callable[[bool, str], None] | None = None,
         data_storage_folder: str = "",
         on_data_storage_folder_changed: Callable[[str], str] | None = None,
+        app_version: str = "",
+        on_check_updates_requested: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(
             title="Settings",
@@ -64,6 +67,8 @@ class SettingsDialog(FramelessDialog):
             else ""
         )
         self._on_data_storage_folder_changed = on_data_storage_folder_changed
+        self._app_version = app_version.strip() if isinstance(app_version, str) else ""
+        self._on_check_updates_requested = on_check_updates_requested
         self._refreshing = False
         self._plugin_cache: tuple[DiscoveredPlugin, ...] = ()
 
@@ -175,6 +180,33 @@ class SettingsDialog(FramelessDialog):
 
         general_layout.addLayout(data_folder_row)
 
+        updates_title = QLabel("App Updates", general_card)
+        updates_title.setObjectName("PluginGeneralTitle")
+        general_layout.addWidget(updates_title)
+
+        update_hint = QLabel(
+            "Startup checks are always enabled for this build.",
+            general_card,
+        )
+        update_hint.setObjectName("PluginGeneralLabel")
+        update_hint.setWordWrap(True)
+        general_layout.addWidget(update_hint)
+
+        update_actions_row = QHBoxLayout()
+        update_actions_row.setContentsMargins(0, 0, 0, 0)
+        update_actions_row.setSpacing(8)
+        self._check_updates_button = QPushButton("Check for Updates", general_card)
+        self._check_updates_button.setObjectName("PluginPickerButton")
+        self._check_updates_button.clicked.connect(self._on_check_updates_clicked)
+        update_actions_row.addWidget(self._check_updates_button, 0)
+        update_actions_row.addStretch(1)
+        general_layout.addLayout(update_actions_row)
+
+        self._auto_update_status_label = QLabel("", general_card)
+        self._auto_update_status_label.setObjectName("PluginPickerStatus")
+        self._auto_update_status_label.setWordWrap(True)
+        general_layout.addWidget(self._auto_update_status_label)
+
         backend_hint = QLabel(
             "Data backend: Local JSON (architecture is ready for future Supabase integration).",
             general_card,
@@ -183,6 +215,9 @@ class SettingsDialog(FramelessDialog):
         backend_hint.setWordWrap(True)
         general_layout.addWidget(backend_hint)
         self._set_data_storage_folder_display(self._data_storage_folder)
+        self._set_update_status(
+            f"Current version: {self._app_version}" if self._app_version else "Current version: unknown"
+        )
 
         top_controls = QHBoxLayout()
         top_controls.setContentsMargins(0, 0, 0, 0)
@@ -457,6 +492,28 @@ class SettingsDialog(FramelessDialog):
         if callable(self._on_palette_shortcut_changed):
             self._on_palette_shortcut_changed(enabled, keybind)
         self.palette_shortcut_changed.emit(enabled, keybind)
+
+    def _on_check_updates_clicked(self) -> None:
+        self._set_update_check_running(True)
+        self._set_update_status("Checking for updates...")
+        if callable(self._on_check_updates_requested):
+            self._on_check_updates_requested()
+        else:
+            self._set_update_check_running(False)
+        self.check_updates_requested.emit()
+
+    def _set_update_status(self, text: str) -> None:
+        message = text.strip() if isinstance(text, str) else ""
+        self._auto_update_status_label.setText(message)
+
+    def set_update_status(self, text: str) -> None:
+        self._set_update_status(text)
+
+    def _set_update_check_running(self, running: bool) -> None:
+        self._check_updates_button.setEnabled(not bool(running))
+
+    def set_update_check_running(self, running: bool) -> None:
+        self._set_update_check_running(running)
 
     def _set_data_storage_folder_display(self, folder: str) -> None:
         text = folder.strip() if isinstance(folder, str) else ""

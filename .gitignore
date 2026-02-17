@@ -32,6 +32,11 @@ data*/
 *.tmp
 *.bak
 
+# Build artifacts
+build/
+dist/
+*.spec
+
 # OS noise
 .DS_Store
 Thumbs.db
