@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -298,13 +299,26 @@ _WINDOWS_UPDATE_SCRIPT = """param(
     [int]$AppPid,
     [string]$ZipPath,
     [string]$TargetDir,
-    [string]$ExecutablePath
+    [string]$ExecutablePath,
+    [string]$LogPath
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
+
+function Write-Log([string]$Message) {
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    Add-Content -LiteralPath $LogPath -Value "[$stamp] $Message"
+}
+
+New-Item -Path (Split-Path -Parent $LogPath) -ItemType Directory -Force | Out-Null
+Write-Log "Updater started."
+Write-Log "ZipPath=$ZipPath"
+Write-Log "TargetDir=$TargetDir"
+Write-Log "ExecutablePath=$ExecutablePath"
 
 for ($attempt = 0; $attempt -lt 180; $attempt++) {
     if (-not (Get-Process -Id $AppPid -ErrorAction SilentlyContinue)) {
+        Write-Log "App process has exited."
         break
     }
     Start-Sleep -Milliseconds 500
@@ -312,21 +326,84 @@ for ($attempt = 0; $attempt -lt 180; $attempt++) {
 
 $stageRoot = Join-Path $env:TEMP ("erpermitsys_update_" + [guid]::NewGuid().ToString("N"))
 New-Item -Path $stageRoot -ItemType Directory -Force | Out-Null
+Write-Log "Stage root: $stageRoot"
 
 try {
     Expand-Archive -LiteralPath $ZipPath -DestinationPath $stageRoot -Force
-    $children = Get-ChildItem -LiteralPath $stageRoot -Force
-    $sourceRoot = $stageRoot
-    if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
-        $sourceRoot = $children[0].FullName
-    }
-
-    Copy-Item -Path (Join-Path $sourceRoot "*") -Destination $TargetDir -Recurse -Force
+    Write-Log "Archive extracted."
 } catch {
-    # Keep going so we can relaunch even if copy fails.
+    Write-Log "Expand-Archive failed: $($_.Exception.Message)"
 }
-Start-Process -FilePath $ExecutablePath
+
+$children = Get-ChildItem -LiteralPath $stageRoot -Force
+$sourceRoot = $stageRoot
+if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
+    $sourceRoot = $children[0].FullName
+}
+Write-Log "Source root: $sourceRoot"
+
+try {
+    $robocopyArgs = @(
+        $sourceRoot,
+        $TargetDir,
+        "/E",
+        "/R:2",
+        "/W:1",
+        "/NFL",
+        "/NDL",
+        "/NJH",
+        "/NJS",
+        "/NP"
+    )
+    $copyProc = Start-Process -FilePath "robocopy.exe" -ArgumentList $robocopyArgs -Wait -PassThru -WindowStyle Hidden
+    if ($copyProc.ExitCode -gt 7) {
+        Write-Log "robocopy failed with exit code $($copyProc.ExitCode)"
+    } else {
+        Write-Log "robocopy completed with exit code $($copyProc.ExitCode)"
+    }
+} catch {
+    Write-Log "robocopy threw error: $($_.Exception.Message)"
+    try {
+        Copy-Item -Path (Join-Path $sourceRoot "*") -Destination $TargetDir -Recurse -Force
+        Write-Log "Copy-Item fallback completed."
+    } catch {
+        Write-Log "Copy-Item fallback failed: $($_.Exception.Message)"
+    }
+}
+
+$launched = $false
+try {
+    Start-Process -FilePath $ExecutablePath | Out-Null
+    $launched = $true
+    Write-Log "Executable launched."
+} catch {
+    Write-Log "Executable launch failed: $($_.Exception.Message)"
+}
+
+if (-not $launched) {
+    Write-Log "Updater exiting with failure."
+    exit 1
+}
+
+Write-Log "Updater completed successfully."
+exit 0
 """
+
+
+def _windows_powershell_executable() -> str:
+    system_root = os.environ.get("SystemRoot", "").strip()
+    if system_root:
+        candidate = Path(system_root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        if candidate.exists():
+            return str(candidate)
+    return "powershell.exe"
+
+
+def _read_file_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
 
 
 def launch_windows_zip_updater(
@@ -353,10 +430,11 @@ def launch_windows_zip_updater(
     try:
         work_dir = Path(tempfile.mkdtemp(prefix="erpermitsys_updater_"))
         script_path = work_dir / "apply_update.ps1"
+        log_path = work_dir / "updater.log"
         script_path.write_text(_WINDOWS_UPDATE_SCRIPT, encoding="utf-8")
 
         command = [
-            "powershell.exe",
+            _windows_powershell_executable(),
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
@@ -370,18 +448,28 @@ def launch_windows_zip_updater(
             str(target),
             "-ExecutablePath",
             str(executable),
+            "-LogPath",
+            str(log_path),
         ]
 
         creationflags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-        creationflags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
+        creationflags |= int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
 
-        subprocess.Popen(
+        process = subprocess.Popen(
             command,
-            close_fds=True,
+            close_fds=False,
             creationflags=creationflags,
             cwd=str(work_dir),
         )
+        time.sleep(0.8)
+        code = process.poll()
+        if code is not None and code != 0:
+            detail = f"Updater process exited early with code {code}."
+            log_text = _read_file_text(log_path).strip()
+            if log_text:
+                detail = f"{detail}\n\n{log_text}"
+            return False, detail
     except Exception as exc:
         return False, f"Could not launch update installer: {exc}"
 
-    return True, ""
+    return True, f"Updater log: {log_path}"

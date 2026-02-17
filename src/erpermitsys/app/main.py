@@ -88,9 +88,9 @@ from erpermitsys.ui.window.frameless_window import FramelessWindow
 
 _PERMIT_CATEGORIES: tuple[str, ...] = ("building", "remodeling", "demolition")
 _PERMIT_CATEGORY_LABELS: dict[str, str] = {
-    "building": "Building",
-    "remodeling": "Remodeling",
-    "demolition": "Demolition",
+    "building": "Building0.0.5",
+    "remodeling": "Remodeling0.0.5",
+    "demolition": "Demolition0.0.5",
 }
 _DEFAULT_DOCUMENT_FOLDER_NAME = "General"
 _UPDATE_STARTUP_DELAY_MS = 1800
@@ -3799,7 +3799,7 @@ class ErPermitSysWindow(FramelessWindow):
 
         is_zip = downloaded_file.name.lower().endswith(".zip")
         if can_self_update_windows() and is_zip:
-            started, error = launch_windows_zip_updater(
+            started, launcher_detail = launch_windows_zip_updater(
                 archive_path=downloaded_file,
                 app_pid=int(QApplication.applicationPid()),
                 target_dir=Path(sys.executable).resolve().parent,
@@ -3809,15 +3809,21 @@ class ErPermitSysWindow(FramelessWindow):
                 self._set_update_settings_status("Installer launch failed.", checking=False)
                 self._show_warning_dialog(
                     "Update Install Failed",
-                    error or "Could not launch update installer.",
+                    launcher_detail or "Could not launch update installer.",
                 )
                 return
 
             self._set_update_settings_status("Installing update and restarting...", checking=False)
+            message_lines = [
+                "The updater was launched in a separate window.",
+                "",
+                "The app will close now and restart after files are replaced.",
+            ]
+            if launcher_detail:
+                message_lines.extend(["", launcher_detail])
             self._show_info_dialog(
                 "Installing Update",
-                "The update installer was launched.\n\n"
-                "The app will close now and restart after files are replaced.",
+                "\n".join(message_lines),
             )
             self.close()
             return
