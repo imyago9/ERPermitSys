@@ -1,4 +1,4 @@
-# CogHUD Rewrite Plugins
+# erpermitsys Plugins
 
 Each plugin lives in its own folder:
 

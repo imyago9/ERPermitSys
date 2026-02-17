@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 def _load_scapture_module():
     module_path = Path(__file__).resolve().with_name("scapture.py")
-    spec = importlib.util.spec_from_file_location("coghud_space_scapture", module_path)
+    spec = importlib.util.spec_from_file_location("erpermitsys_space_scapture", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load scapture module at {module_path}")
     module = importlib.util.module_from_spec(spec)

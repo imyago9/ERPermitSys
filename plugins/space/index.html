@@ -949,7 +949,7 @@
             const connected = await new Promise((resolve)=>{
               try {
                 new QWebChannel(window.qt.webChannelTransport, (channel)=>{
-                  const obj = (channel && channel.objects) ? channel.objects.coghudBridge : null;
+                  const obj = (channel && channel.objects) ? channel.objects.erpermitsysBridge : null;
                   resolve(obj || null);
                 });
               } catch (err) {
