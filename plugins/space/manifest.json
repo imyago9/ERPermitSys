@@ -1,0 +1,11 @@
+{
+  "id": "space",
+  "kind": "html-background",
+  "name": "Space",
+  "version": "0.1.0",
+  "description": "Port of the original Space animation background with optional audio-reactive backend.",
+  "entry": "index.html",
+  "backend": "backend.py",
+  "tags": ["space", "background", "audio"],
+  "enabled": true
+}

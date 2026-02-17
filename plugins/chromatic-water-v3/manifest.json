@@ -1,0 +1,10 @@
+{
+  "id": "chromatic-water-v3",
+  "kind": "html-background",
+  "name": "Chromatic Water V3",
+  "version": "0.1.0",
+  "description": "Chromatic dreamfield background with layered silk-string motion.",
+  "entry": "index.html",
+  "tags": ["background", "chromatic", "ambient"],
+  "enabled": true
+}

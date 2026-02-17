@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chromatic Infinite Strings · Ultra</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #03050d;
+    }
+    canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .film {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      mix-blend-mode: soft-light;
+      opacity: 0.36;
+      background:
+        radial-gradient(140vmax 140vmax at 50% 50%, rgba(255,255,255,.04), rgba(0,0,0,.42) 64%, rgba(0,0,0,.92) 100%),
+        repeating-linear-gradient(0deg, rgba(255,255,255,.010) 0 1px, rgba(0,0,0,.012) 1px 2px);
+    }
+    .fallback {
+      position: fixed;
+      inset: 0;
+      display: none;
+      background:
+        radial-gradient(95vmax 95vmax at 18% 28%, #22d3ee66, transparent 58%),
+        radial-gradient(88vmax 88vmax at 81% 69%, #f472b666, transparent 60%),
+        radial-gradient(76vmax 76vmax at 52% 84%, #818cf866, transparent 62%),
+        linear-gradient(145deg, #0b1022 0%, #070b16 48%, #11183a 100%);
+      animation: fallbackShift 18s ease-in-out infinite alternate;
+      filter: saturate(1.3);
+    }
+    @keyframes fallbackShift {
+      0%   { transform: scale(1.03) translate(-1.2%, -0.8%); filter: hue-rotate(0deg) saturate(1.14); }
+      100% { transform: scale(1.09) translate(1.2%, 1.1%);  filter: hue-rotate(30deg) saturate(1.38); }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <div class="fallback" id="fallback"></div>
+  <div class="film"></div>
+
+  <script>
+  (() => {
+    const canvas = document.getElementById('gl');
+    const fallback = document.getElementById('fallback');
+
+    const gl = canvas.getContext('webgl', {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: false,
+      powerPreference: 'high-performance'
+    });
+
+    if (!gl) {
+      fallback.style.display = 'block';
+      return;
+    }
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const VERT = `
+      attribute vec2 a_pos;
+      varying vec2 v_uv;
+      void main() {
+        v_uv = a_pos * 0.5 + 0.5;
+        gl_Position = vec4(a_pos, 0.0, 1.0);
+      }
+    `;
+
+    const SIM_FRAG = `
+      precision highp float;
+      varying vec2 v_uv;
+      uniform sampler2D u_prev;
+      uniform vec2 u_res;
+      uniform vec2 u_mouse;
+      uniform float u_time;
+      uniform float u_dt;
+
+      #define TAU 6.28318530718
+
+      float hash21(vec2 p){
+        p = fract(p * vec2(234.34, 435.345));
+        p += dot(p, p + 34.23);
+        return fract(p.x * p.y);
+      }
+
+      float noise(vec2 p){
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f*f*(3.0-2.0*f);
+        float a = hash21(i + vec2(0.0, 0.0));
+        float b = hash21(i + vec2(1.0, 0.0));
+        float c = hash21(i + vec2(0.0, 1.0));
+        float d = hash21(i + vec2(1.0, 1.0));
+        return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+      }
+
+      float fbm(vec2 p){
+        float v = 0.0;
+        float a = 0.56;
+        mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+        for(int i=0;i<6;i++){
+          v += a * noise(p);
+          p = m * p;
+          a *= 0.53;
+        }
+        return v;
+      }
+
+      vec2 flow(vec2 p, float t){
+        float a = fbm(p*1.55 + vec2(0.0, t*0.12));
+        float b = fbm((p+vec2(4.2,-3.1))*1.9 + vec2(-t*0.11, t*0.09));
+        float c = fbm((p-vec2(1.9,2.7))*2.6 + vec2(t*0.06, -t*0.08));
+        float ang = TAU*(a - b + 0.35*c);
+        return vec2(cos(ang), sin(ang));
+      }
+
+      vec3 palette(float t){
+        vec3 a = vec3(0.54, 0.43, 0.66);
+        vec3 b = vec3(0.45, 0.53, 0.35);
+        vec3 c = vec3(1.0);
+        vec3 d = vec3(0.00, 0.12, 0.25);
+        return a + b*cos(TAU*(c*t + d));
+      }
+
+      float filament(vec2 p, float t, float freq, float thick, float warp){
+        p += warp * vec2(
+          sin(p.y*1.7 + t*0.7) + 0.5*sin(p.y*3.2 - t*0.3),
+          cos(p.x*1.3 - t*0.6) + 0.5*cos(p.x*2.6 + t*0.25)
+        );
+        float f = abs(sin(p.x*freq + 0.8*sin(p.y*2.4 + t*0.9) + t*0.45));
+        return smoothstep(thick, 0.0, f);
+      }
+
+      vec3 sampleSoft(sampler2D tex, vec2 uv, vec2 px){
+        // Intentionally energy-damped kernel (sum < 1.0) to prevent runaway whiteout.
+        vec3 c = texture2D(tex, uv).rgb * 0.22;
+        c += texture2D(tex, uv + vec2(px.x, 0.0)).rgb * 0.11;
+        c += texture2D(tex, uv - vec2(px.x, 0.0)).rgb * 0.11;
+        c += texture2D(tex, uv + vec2(0.0, px.y)).rgb * 0.11;
+        c += texture2D(tex, uv - vec2(0.0, px.y)).rgb * 0.11;
+        c += texture2D(tex, uv + vec2( px.x,  px.y)).rgb * 0.06;
+        c += texture2D(tex, uv + vec2(-px.x,  px.y)).rgb * 0.06;
+        c += texture2D(tex, uv + vec2( px.x, -px.y)).rgb * 0.06;
+        c += texture2D(tex, uv + vec2(-px.x, -px.y)).rgb * 0.06;
+        return c;
+      }
+
+      void main(){
+        vec2 uv = v_uv;
+        vec2 res = u_res;
+        vec2 px = 1.0 / res;
+
+        vec2 aspect = vec2(res.x / res.y, 1.0);
+        vec2 p = (uv - 0.5) * aspect;
+        vec2 m = (u_mouse / res - 0.5) * 2.0;
+        m.x *= res.x / res.y;
+
+        float t = u_time;
+
+        vec2 v = flow(p*2.05, t);
+        vec2 drift = vec2(sin(t*0.13), cos(t*0.11)) * 0.0008;
+
+        float md = length(p - m*0.22);
+        float attract = exp(-5.0 * md*md);
+        vec2 mvec = normalize(p - m*0.22 + 1e-5) * attract * 0.0025;
+
+        vec2 backUV = uv - v * (0.0026 + 0.0018*attract) - drift + mvec;
+
+        vec3 prev = sampleSoft(u_prev, backUV, px * 1.25);
+
+        // Persistent decay (controls infinite trails)
+        prev *= 0.955;
+
+        // Chromatic dream clouds
+        float cloud = fbm(p*3.9 + vec2(t*0.22, -t*0.20));
+        float detail = fbm(p*9.2 - vec2(t*0.58, t*0.52));
+
+        // Braided string emissions
+        vec2 q = p;
+        q += 0.24 * flow(q*1.8, t);
+        q += 0.18 * flow(q*2.7 + 4.7, -t*0.86);
+
+        float s1 = filament(q*1.18, t, 17.0, 0.105, 0.22);
+        float s2 = filament((q+vec2(0.35,-0.22))*1.11, -t*0.84 + 3.2, 14.0, 0.112, 0.24);
+        float s3 = filament((q-vec2(0.21,0.29))*1.31, t*0.77 - 1.9, 21.0, 0.095, 0.18);
+
+        float knot = smoothstep(0.0, 1.0, s1*0.7 + s2*0.65 + s3*0.55);
+        float pulse = 0.55 + 0.45*sin(t*1.7 + cloud*4.0 + detail*2.0);
+
+        vec3 silk1 = vec3(0.20, 0.82, 1.00);
+        vec3 silk2 = vec3(1.00, 0.36, 0.90);
+        vec3 silk3 = vec3(0.72, 0.66, 1.00);
+
+        vec3 emit = vec3(0.0);
+        emit += silk1 * pow(s1, 1.35) * (0.17 + 0.10*pulse);
+        emit += silk2 * pow(s2, 1.34) * (0.16 + 0.09*(1.0-pulse));
+        emit += silk3 * pow(s3, 1.45) * 0.12;
+
+        // Dreamfield tint
+        vec3 tintA = palette(0.08 + cloud*0.95 + t*0.010);
+        vec3 tintB = palette(0.61 + detail*0.72 - t*0.008);
+        vec3 dream = mix(tintA, tintB, smoothstep(0.05, 0.95, cloud));
+        emit += dream * (0.010 + 0.014*knot);
+
+        // Localized glow near pointer
+        float halo = exp(-6.2*dot(p - m*0.20, p - m*0.20));
+        emit += mix(silk1, silk2, 0.5 + 0.5*sin(t*0.4)) * halo * 0.020;
+
+        vec3 col = prev + emit;
+
+        // Whiteout protection / energy clamp
+        float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+        col *= 1.0 - 0.30 * smoothstep(0.55, 1.35, lum);
+        col = col / (1.0 + col * 0.65);
+
+        // Mild black floor lift to avoid dead pixels
+        col = max(col, vec3(0.0007, 0.0009, 0.0012));
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `;
+
+    const DISPLAY_FRAG = `
+      precision highp float;
+      varying vec2 v_uv;
+      uniform sampler2D u_tex;
+      uniform vec2 u_res;
+      uniform float u_time;
+
+      vec3 aces(vec3 x) {
+        return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
+      }
+
+      vec3 bloom(sampler2D tex, vec2 uv, vec2 px){
+        vec3 c = texture2D(tex, uv).rgb * 0.23;
+        c += texture2D(tex, uv + vec2(px.x*2.0, 0.0)).rgb * 0.12;
+        c += texture2D(tex, uv - vec2(px.x*2.0, 0.0)).rgb * 0.12;
+        c += texture2D(tex, uv + vec2(0.0, px.y*2.0)).rgb * 0.12;
+        c += texture2D(tex, uv - vec2(0.0, px.y*2.0)).rgb * 0.12;
+        c += texture2D(tex, uv + vec2(px.x*3.0, px.y*3.0)).rgb * 0.08;
+        c += texture2D(tex, uv + vec2(-px.x*3.0, px.y*3.0)).rgb * 0.08;
+        c += texture2D(tex, uv + vec2(px.x*3.0, -px.y*3.0)).rgb * 0.08;
+        c += texture2D(tex, uv + vec2(-px.x*3.0, -px.y*3.0)).rgb * 0.08;
+        return c;
+      }
+
+      void main(){
+        vec2 uv = v_uv;
+        vec2 px = 1.0 / u_res;
+
+        // subtle chromatic split
+        vec3 r = texture2D(u_tex, uv + vec2(px.x*1.2, 0.0)).rgb;
+        vec3 g = texture2D(u_tex, uv).rgb;
+        vec3 b = texture2D(u_tex, uv - vec2(px.x*1.2, 0.0)).rgb;
+        vec3 col = vec3(r.r, g.g, b.b);
+
+        vec3 bl = bloom(u_tex, uv, px);
+        col += bl * 0.16;
+
+        // micro shimmer
+        float sh = 0.5 + 0.5*sin(u_time*0.8 + uv.x*8.0 + uv.y*6.0);
+        col *= 0.985 + 0.02*sh;
+
+        col = aces(max(col, 0.0));
+        col = pow(col, vec3(0.94));
+
+        vec2 p = uv - 0.5;
+        p.x *= u_res.x / u_res.y;
+        float vign = smoothstep(0.98, 0.14, length(p));
+        col *= vign;
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `;
+
+    function createShader(type, source) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, source);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        const log = gl.getShaderInfoLog(s);
+        gl.deleteShader(s);
+        throw new Error(log || 'Shader compile failed');
+      }
+      return s;
+    }
+
+    function createProgram(vs, fs) {
+      const p = gl.createProgram();
+      const sv = createShader(gl.VERTEX_SHADER, vs);
+      const sf = createShader(gl.FRAGMENT_SHADER, fs);
+      gl.attachShader(p, sv);
+      gl.attachShader(p, sf);
+      gl.linkProgram(p);
+      gl.deleteShader(sv);
+      gl.deleteShader(sf);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        const log = gl.getProgramInfoLog(p);
+        gl.deleteProgram(p);
+        throw new Error(log || 'Program link failed');
+      }
+      return p;
+    }
+
+    let simProgram, displayProgram;
+    try {
+      simProgram = createProgram(VERT, SIM_FRAG);
+      displayProgram = createProgram(VERT, DISPLAY_FRAG);
+    } catch (err) {
+      console.error(err);
+      canvas.style.display = 'none';
+      fallback.style.display = 'block';
+      return;
+    }
+
+    const quad = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -1, -1,
+       1, -1,
+      -1,  1,
+       1,  1
+    ]), gl.STATIC_DRAW);
+
+    function createTexture(w, h) {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      return tex;
+    }
+
+    function createFBO(tex) {
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+      if (!ok) throw new Error('Framebuffer incomplete');
+      return fbo;
+    }
+
+    let dpr = 1;
+    let simW = 1, simH = 1;
+    let texA, texB, fboA, fboB;
+    let readTex = null, writeTex = null;
+    let readFbo = null, writeFbo = null;
+
+    function destroyPingPong() {
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      if (texA) gl.deleteTexture(texA);
+      if (texB) gl.deleteTexture(texB);
+      if (fboA) gl.deleteFramebuffer(fboA);
+      if (fboB) gl.deleteFramebuffer(fboB);
+      texA = texB = fboA = fboB = null;
+    }
+
+    function makePingPong() {
+      destroyPingPong();
+      texA = createTexture(simW, simH);
+      texB = createTexture(simW, simH);
+      fboA = createFBO(texA);
+      fboB = createFBO(texB);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+      gl.viewport(0, 0, simW, simH);
+      gl.clearColor(0.01, 0.013, 0.02, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
+      gl.viewport(0, 0, simW, simH);
+      gl.clearColor(0.01, 0.013, 0.02, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+      // Repoint render loop state to the newly created ping-pong resources.
+      readTex = texA;
+      writeTex = texB;
+      readFbo = fboA;
+      writeFbo = fboB;
+    }
+
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const cw = Math.max(1, Math.floor(window.innerWidth * dpr));
+      const ch = Math.max(1, Math.floor(window.innerHeight * dpr));
+
+      if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw;
+        canvas.height = ch;
+      }
+
+      // Slightly lower sim resolution for stability + style softness
+      const scale = reducedMotion ? 0.45 : 0.72;
+      const nw = Math.max(2, Math.floor(cw * scale));
+      const nh = Math.max(2, Math.floor(ch * scale));
+
+      if (nw !== simW || nh !== simH) {
+        simW = nw;
+        simH = nh;
+        makePingPong();
+      }
+
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    const pointer = { x: 0.5, y: 0.5 };
+    const target = { x: 0.5, y: 0.5 };
+
+    function setPointer(clientX, clientY) {
+      target.x = clientX / window.innerWidth;
+      target.y = 1.0 - clientY / window.innerHeight;
+    }
+
+    window.addEventListener('mousemove', (e) => setPointer(e.clientX, e.clientY), { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      const t = e.touches && e.touches[0];
+      if (t) setPointer(t.clientX, t.clientY);
+    }, { passive: true });
+    window.addEventListener('resize', resize, { passive: true });
+
+    resize();
+
+    function setupAttrib(program) {
+      const loc = gl.getAttribLocation(program, 'a_pos');
+      gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    }
+
+    // Uniform locations
+    const simLoc = {
+      u_prev: gl.getUniformLocation(simProgram, 'u_prev'),
+      u_res: gl.getUniformLocation(simProgram, 'u_res'),
+      u_mouse: gl.getUniformLocation(simProgram, 'u_mouse'),
+      u_time: gl.getUniformLocation(simProgram, 'u_time'),
+      u_dt: gl.getUniformLocation(simProgram, 'u_dt')
+    };
+
+    const dispLoc = {
+      u_tex: gl.getUniformLocation(displayProgram, 'u_tex'),
+      u_res: gl.getUniformLocation(displayProgram, 'u_res'),
+      u_time: gl.getUniformLocation(displayProgram, 'u_time')
+    };
+
+    function swap() {
+      [readTex, writeTex] = [writeTex, readTex];
+      [readFbo, writeFbo] = [writeFbo, readFbo];
+    }
+
+    const start = performance.now();
+    let last = start;
+    let running = true;
+    let pausedAccum = 0;
+    let hideStart = 0;
+
+    function render(now) {
+      if (!running) return;
+
+      let dt = (now - last) * 0.001;
+      last = now;
+      dt = Math.min(0.05, Math.max(0.001, dt));
+
+      const elapsed = (now - start - pausedAccum) * 0.001;
+      const t = reducedMotion ? elapsed * 0.3 : elapsed;
+
+      pointer.x += (target.x - pointer.x) * 0.055;
+      pointer.y += (target.y - pointer.y) * 0.055;
+
+      if (!readTex || !writeFbo) {
+        requestAnimationFrame(render);
+        return;
+      }
+
+      // SIM PASS
+      gl.useProgram(simProgram);
+      setupAttrib(simProgram);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, writeFbo);
+      gl.viewport(0, 0, simW, simH);
+
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, readTex);
+      gl.uniform1i(simLoc.u_prev, 0);
+      gl.uniform2f(simLoc.u_res, simW, simH);
+      gl.uniform2f(simLoc.u_mouse, pointer.x * simW, pointer.y * simH);
+      gl.uniform1f(simLoc.u_time, t);
+      gl.uniform1f(simLoc.u_dt, dt);
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      swap();
+
+      // DISPLAY PASS
+      gl.useProgram(displayProgram);
+      setupAttrib(displayProgram);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, readTex);
+      gl.uniform1i(dispLoc.u_tex, 0);
+      gl.uniform2f(dispLoc.u_res, canvas.width, canvas.height);
+      gl.uniform1f(dispLoc.u_time, t);
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      requestAnimationFrame(render);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        hideStart = performance.now();
+        running = false;
+      } else {
+        if (hideStart) pausedAccum += performance.now() - hideStart;
+        running = true;
+        last = performance.now();
+        requestAnimationFrame(render);
+      }
+    });
+
+    requestAnimationFrame(render);
+  })();
+  </script>
+</body>
+</html>

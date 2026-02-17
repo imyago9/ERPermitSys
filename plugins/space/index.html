@@ -1,0 +1,2591 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Space Animation v2 — Day/Night + Color Cycles</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #05070e;
+    }
+    canvas { display: block; width: 100vw; height: 100vh; }
+
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #hud {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      width: min(440px, 92vw);
+      color: #e3ecf8;
+      z-index: 5;
+      pointer-events: none;
+      font-size: 12px;
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+    #hud.near,
+    #hud:hover,
+    #hud:focus-within,
+    #hud.pinned {
+      pointer-events: auto;
+      opacity: 1;
+      transform: translateY(0);
+    }
+    #hud-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(10, 42, 108, 0.32);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 8px 10px;
+      pointer-events: auto;
+      backdrop-filter: blur(6px);
+    }
+    #hud-bar span {
+      color: rgba(227, 236, 248, 0.7);
+      margin-left: 10px;
+    }
+    #hud-toggle {
+      background: rgba(16, 22, 34, 0.85);
+      color: #e3ecf8;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 11px;
+      letter-spacing: 0.4px;
+    }
+    #hud-panel {
+      margin-top: 10px;
+      background: rgba(8, 36, 98, 0.34);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 14px;
+      padding: 12px;
+      backdrop-filter: blur(10px);
+    }
+    #hud-panel.collapsed { display: none; }
+    .hud-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .hud-row label {
+      min-width: 86px;
+      color: rgba(227, 236, 248, 0.75);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .hud-row button, .hud-row select {
+      background: rgba(16, 22, 34, 0.85);
+      color: #e3ecf8;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 11px;
+    }
+    .hud-row button { cursor: pointer; }
+    .hud-row select { flex: 1; }
+    .hud-slider {
+      display: grid;
+      grid-template-columns: 100px 1fr 46px;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .hud-slider span {
+      color: rgba(227, 236, 248, 0.7);
+      font-size: 11px;
+    }
+    .hud-slider output {
+      color: rgba(227, 236, 248, 0.65);
+      text-align: right;
+      font-size: 11px;
+    }
+    input[type="range"] {
+      accent-color: #6f8bff;
+    }
+    #hud-panel .hud-row input[type="range"] {
+      flex: 1;
+    }
+    #audio-status {
+      color: rgba(227, 236, 248, 0.6);
+      font-size: 11px;
+      flex: 1;
+    }
+    .hud-section {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div id="hud-bar">
+      <button id="hud-toggle">Controls</button>
+      <div>
+        <span id="phase">--</span>
+        <span id="tod">--</span>
+      </div>
+    </div>
+    <div id="hud-panel">
+      <div class="hud-row">
+        <label>Background</label>
+        <button id="bg-toggle">Background: ON</button>
+      </div>
+      <div class="hud-row">
+        <label>Day/Night</label>
+        <input id="knob" type="range" min="0" max="1" step="0.001" />
+        <button id="auto">Auto: ON</button>
+      </div>
+      <div class="hud-row">
+        <label>Audio</label>
+        <button id="anim-toggle">Audio: OFF</button>
+        <select id="anim-mode">
+          <option value="focus">Focus</option>
+          <option value="hyper">Hyper</option>
+          <option value="minimal">Minimal</option>
+        </select>
+      </div>
+      <div class="hud-row">
+        <label>Notes</label>
+        <button id="note-toggle">Note Grid: OFF</button>
+        <select id="note-mode">
+          <option value="pitch-class">Pitch class (12)</option>
+          <option value="octave">Octave range (40-16k)</option>
+          <option value="piano">Piano range (88)</option>
+          <option value="full">Full 20-20k</option>
+        </select>
+        <select id="note-layout">
+          <option value="auto">Layout: Auto</option>
+          <option value="11x8">Layout: 11x8</option>
+          <option value="12x8">Layout: 12x8</option>
+          <option value="4x22">Layout: 4x22</option>
+          <option value="1x88">Layout: 1x88</option>
+        </select>
+      </div>
+      <div class="hud-row">
+        <label>Device</label>
+        <select id="audio-device"></select>
+        <span id="audio-status">Select output</span>
+      </div>
+
+      <div class="hud-section">
+        <div class="hud-slider">
+          <span>Node speed</span>
+          <input id="node-speed" type="range" min="0.1" max="2" step="0.01" />
+          <output id="node-speed-val">0.85</output>
+        </div>
+        <div class="hud-slider">
+          <span>Shooters</span>
+          <input id="shooter-rate" type="range" min="0.1" max="2" step="0.01" />
+          <output id="shooter-rate-val">0.75</output>
+        </div>
+        <div class="hud-slider">
+          <span>Star glow</span>
+          <input id="star-alpha" type="range" min="0.1" max="2.5" step="0.01" />
+          <output id="star-alpha-val">2.00</output>
+        </div>
+      </div>
+
+      <div class="hud-section">
+        <div class="hud-slider">
+          <span>Dust</span>
+          <input id="dust" type="range" min="0.1" max="3" step="0.01" />
+          <output id="dust-val">1.60</output>
+        </div>
+        <div class="hud-slider">
+          <span>Comets</span>
+          <input id="comet-rate" type="range" min="0.1" max="2" step="0.01" />
+          <output id="comet-rate-val">1.10</output>
+        </div>
+        <div class="hud-slider">
+          <span>Nodes</span>
+          <input id="node-count" type="range" min="10" max="240" step="1" />
+          <output id="node-count-val">120</output>
+        </div>
+        <div class="hud-slider">
+          <span>Stars</span>
+          <input id="star-count" type="range" min="100" max="1200" step="10" />
+          <output id="star-count-val">900</output>
+        </div>
+      </div>
+
+      <div class="hud-section">
+        <div class="hud-slider">
+          <span>Link alpha</span>
+          <input id="link-alpha" type="range" min="0.1" max="2" step="0.01" />
+          <output id="link-alpha-val">1.25</output>
+        </div>
+        <div class="hud-slider">
+          <span>Link dist</span>
+          <input id="link-dist" type="range" min="0.3" max="2" step="0.01" />
+          <output id="link-dist-val">1.20</output>
+        </div>
+        <div class="hud-slider">
+          <span>Cam speed</span>
+          <input id="cam-speed" type="range" min="0.2" max="2.5" step="0.01" />
+          <output id="cam-speed-val">2.50</output>
+        </div>
+        <div class="hud-slider">
+          <span>Nebula</span>
+          <input id="nebula" type="range" min="0.2" max="3" step="0.01" />
+          <output id="nebula-val">3.00</output>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>
+    // v2 improvements:
+    // - Day/Night knob (0=day, 1=night) with smooth crossfade and sun<->moon shift
+    // - 4 time-of-day color cycles based on knob position:
+    //   12am-6am, 6am-12pm, 12pm-6pm, 6pm-12am
+    // - More depth: subtle background gradient, star bloom, node trails, comet dust
+
+    const canvas = document.getElementById('c');
+    const screenCtx = canvas.getContext('2d', { alpha: false });
+    const sceneCanvas = document.createElement('canvas');
+    const sceneCtx = sceneCanvas.getContext('2d', { alpha: false });
+    const bloomCanvas = document.createElement('canvas');
+    const bloomCtx = bloomCanvas.getContext('2d', { alpha: true });
+    let ctx = sceneCtx;
+
+    let W = 1, H = 1;
+    let sceneReady = false;
+    let sceneBoundsReady = false;
+    let dpr = 1;
+    let uiSync = {};
+    let audioEnabled = false;
+    let backgroundEnabled = true;
+    let eventSocket = null;
+    let audioDeviceRefreshTimer = null;
+    let audioPollTimer = null;
+    let lastAudioSeq = -1;
+    let bridgeObject = null;
+    let bridgeReadyPromise = null;
+    let bridgeEventsBound = false;
+    let suppressPreferenceSync = false;
+
+    function rescaleEntities(oldW, oldH, newW, newH) {
+      if (!oldW || !oldH) return;
+      if (Math.abs(newW - oldW) < 1 && Math.abs(newH - oldH) < 1) return;
+      const sx = newW / oldW;
+      const sy = newH / oldH;
+      const scalePos = (arr) => {
+        for (const e of arr) {
+          if (e.x != null) e.x *= sx;
+          if (e.y != null) e.y *= sy;
+        }
+      };
+      scalePos(stars);
+      scalePos(nodes);
+      scalePos(shooters);
+      scalePos(comets);
+      scalePos(asteroids);
+      scalePos(dust);
+      camX *= sx;
+      camY *= sy;
+    }
+
+    function resize() {
+      dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      const oldW = W;
+      const oldH = H;
+      const cssW = Math.max(1, Math.floor(innerWidth || 0));
+      const cssH = Math.max(1, Math.floor(innerHeight || 0));
+      const newW = Math.max(1, Math.floor(cssW * dpr));
+      const newH = Math.max(1, Math.floor(cssH * dpr));
+      if (sceneReady && newW === canvas.width && newH === canvas.height) return;
+      canvas.width = newW;
+      canvas.height = newH;
+      sceneCanvas.width = newW;
+      sceneCanvas.height = newH;
+      bloomCanvas.width = newW;
+      bloomCanvas.height = newH;
+      canvas.style.width = cssW + 'px';
+      canvas.style.height = cssH + 'px';
+      screenCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      sceneCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      bloomCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      W = cssW;
+      H = cssH;
+      if (sceneReady) {
+        if (oldW <= 1 || oldH <= 1) {
+          // If startup happened at 0x0/1x1, spread entities when real bounds become available.
+          spreadEntitiesToBounds();
+        } else {
+          rescaleEntities(oldW, oldH, W, H);
+        }
+      }
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    const rand = (a,b)=>a+Math.random()*(b-a);
+    const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+    const lerp = (a,b,t)=>a+(b-a)*t;
+    const smooth = (t)=>t*t*(3-2*t);
+    function sceneSpawnWidth() {
+      return Math.max(1, Math.floor(W || 0), Math.floor(canvas.clientWidth || 0), Math.floor(window.innerWidth || 0));
+    }
+    function sceneSpawnHeight() {
+      return Math.max(1, Math.floor(H || 0), Math.floor(canvas.clientHeight || 0), Math.floor(window.innerHeight || 0));
+    }
+    function spreadEntitiesToBounds() {
+      const spawnW = sceneSpawnWidth();
+      const spawnH = sceneSpawnHeight();
+      const spread = (arr) => {
+        for (const e of arr) {
+          if (e.x != null) e.x = rand(0, spawnW);
+          if (e.y != null) e.y = rand(0, spawnH);
+          if (e.px != null) e.px = e.x;
+          if (e.py != null) e.py = e.y;
+        }
+      };
+      spread(stars);
+      spread(nodes);
+      spread(shooters);
+      spread(comets);
+      spread(asteroids);
+      spread(dust);
+      camX = 0;
+      camY = 0;
+    }
+    function hslToRgb(h, s, l) {
+      const hue = ((h % 360) + 360) % 360;
+      const sat = clamp(s, 0, 1);
+      const lig = clamp(l, 0, 1);
+      const c = (1 - Math.abs(2 * lig - 1)) * sat;
+      const hp = hue / 60;
+      const x = c * (1 - Math.abs((hp % 2) - 1));
+      let r = 0, g = 0, b = 0;
+      if (hp >= 0 && hp < 1) { r = c; g = x; b = 0; }
+      else if (hp < 2) { r = x; g = c; b = 0; }
+      else if (hp < 3) { r = 0; g = c; b = x; }
+      else if (hp < 4) { r = 0; g = x; b = c; }
+      else if (hp < 5) { r = x; g = 0; b = c; }
+      else { r = c; g = 0; b = x; }
+      const m = lig - c / 2;
+      return [
+        Math.round((r + m) * 255),
+        Math.round((g + m) * 255),
+        Math.round((b + m) * 255),
+      ];
+    }
+
+    // Location + solar helpers (neutral defaults; runtime settings can override).
+    let LOCATION = { lat: 0.0, lon: 0.0, timeZone: "UTC", zip: "00000" };
+    const DAY_MS = 86400000;
+    const DEG2RAD = Math.PI / 180;
+    const RAD2DEG = 180 / Math.PI;
+
+    const J0 = 0.0009;
+    const J1970 = 2440588;
+    const J2000 = 2451545;
+    const SOLAR_E = DEG2RAD * 23.4397;
+
+    // Pull numeric date parts for a given IANA timezone.
+    function zonedParts(date, timeZone) {
+      const dtf = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hour12: false,
+      });
+      const out = { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
+      for (const p of dtf.formatToParts(date)) {
+        if (p.type !== "literal") out[p.type] = parseInt(p.value, 10);
+      }
+      return out;
+    }
+
+    // Offset (minutes) between the given zone and UTC at the provided instant.
+    function tzOffsetMinutes(date, timeZone) {
+      const p = zonedParts(date, timeZone);
+      const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+      return (asUTC - date.getTime()) / 60000;
+    }
+
+    function dateFromParts(parts, offsetMinutes) {
+      return new Date(
+        Date.UTC(
+          parts.year,
+          (parts.month || 1) - 1,
+          parts.day || 1,
+          parts.hour || 0,
+          parts.minute || 0,
+          parts.second || 0
+        ) - offsetMinutes * 60000
+      );
+    }
+
+    function toJulian(date) { return date.valueOf() / DAY_MS - 0.5 + J1970; }
+    function fromJulian(j) { return new Date((j + 0.5 - J1970) * DAY_MS); }
+    function toDays(date) { return toJulian(date) - J2000; }
+
+    function solarMeanAnomaly(d) { return DEG2RAD * (357.5291 + 0.98560028 * d); }
+    function eclipticLongitude(M) {
+      const C = DEG2RAD * (1.9148 * Math.sin(M) + 0.0200 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+      const P = DEG2RAD * 102.9372;
+      return M + C + P + Math.PI;
+    }
+    function declination(L) { return Math.asin(Math.sin(L) * Math.sin(SOLAR_E)); }
+    function rightAscension(L) { return Math.atan2(Math.sin(L) * Math.cos(SOLAR_E), Math.cos(L)); }
+    function siderealTime(d, lw) { return DEG2RAD * (280.16 + 360.9856235 * d) - lw; }
+    function altitude(H, phi, dec) { return Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H)); }
+    function azimuth(H, phi, dec) { return Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi)); }
+    function hourAngle(h, phi, dec) { return Math.acos((Math.sin(h) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec))); }
+    function approxTransit(Ht, lw, n) { return J0 + (Ht + lw) / (2 * Math.PI) + n; }
+    function solarTransitJ(ds, M, L) { return J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L); }
+    function getSetJ(h, lw, phi, dec, n, M, L) {
+      const w = hourAngle(h, phi, dec);
+      const a = approxTransit(w, lw, n);
+      return solarTransitJ(a, M, L);
+    }
+
+    function getSunTimes(date, lat, lon) {
+      const lw = DEG2RAD * -lon;
+      const phi = DEG2RAD * lat;
+      const d = toDays(date);
+      const n = Math.round(d - J0 - lw / (2 * Math.PI));
+      const ds = approxTransit(0, lw, n);
+      const M = solarMeanAnomaly(ds);
+      const L = eclipticLongitude(M);
+      const dec = declination(L);
+      const Jnoon = solarTransitJ(ds, M, L);
+      const h0 = (-0.833) * DEG2RAD; // standard refraction
+      const Jset = getSetJ(h0, lw, phi, dec, n, M, L);
+      const Jrise = Jnoon - (Jset - Jnoon);
+      return { sunrise: fromJulian(Jrise), sunset: fromJulian(Jset), solarNoon: fromJulian(Jnoon) };
+    }
+
+    function getSunPosition(date, lat, lon) {
+      const lw = DEG2RAD * -lon;
+      const phi = DEG2RAD * lat;
+      const d = toDays(date);
+      const M = solarMeanAnomaly(d);
+      const L = eclipticLongitude(M);
+      const dec = declination(L);
+      const ra = rightAscension(L);
+      const th = siderealTime(d, lw);
+      const H = th - ra;
+      return { azimuth: azimuth(H, phi, dec), altitude: altitude(H, phi, dec) };
+    }
+
+    const DAY_ALT_DEG = 10;
+    const NIGHT_ALT_DEG = -6;
+    function nightnessFromAltitude(altRad) {
+      const altDeg = altRad * RAD2DEG;
+      if (!Number.isFinite(altDeg)) return 0.5;
+      if (altDeg >= DAY_ALT_DEG) return 0;
+      if (altDeg <= NIGHT_ALT_DEG) return 1;
+      return 1 - (altDeg - NIGHT_ALT_DEG) / (DAY_ALT_DEG - NIGHT_ALT_DEG);
+    }
+
+    let solarCache = null;
+    let solarCacheTs = 0;
+    function refreshSolarCache(now = new Date()) {
+      const parts = zonedParts(now, LOCATION.timeZone);
+      const key = `${parts.year}-${parts.month}-${parts.day}`;
+      const fresh = solarCache && solarCache.key === key && (now.getTime() - solarCacheTs) < 60000;
+      if (fresh) return solarCache;
+
+      const offset = tzOffsetMinutes(now, LOCATION.timeZone);
+      const todayMid = dateFromParts({ year: parts.year, month: parts.month, day: parts.day, hour: 0, minute: 0, second: 0 }, offset);
+      const yesterdayMid = new Date(todayMid.getTime() - DAY_MS);
+      const tomorrowMid = new Date(todayMid.getTime() + DAY_MS);
+
+      solarCache = {
+        key,
+        parts,
+        offsetMinutes: offset,
+        prev: getSunTimes(yesterdayMid, LOCATION.lat, LOCATION.lon),
+        today: getSunTimes(todayMid, LOCATION.lat, LOCATION.lon),
+        tomorrow: getSunTimes(tomorrowMid, LOCATION.lat, LOCATION.lon),
+      };
+      solarCacheTs = now.getTime();
+      return solarCache;
+    }
+
+    // Bridge helper: current dial time string for UI
+    window.getDialLocalTime = (k=null)=>{
+      const val = (k===null || k===undefined) ? dayNight : clamp(parseFloat(k)||0,0,1);
+      const ph = autoHourOverride ?? pseudoHourForKnob(val);
+      return hhmmForPseudoHour(ph);
+    };
+
+    window.setLocation = (data)=>{
+      if (!data || typeof data !== "object") return;
+      const lat = parseFloat(data.lat);
+      const lon = parseFloat(data.lon);
+      if (Number.isFinite(lat)) LOCATION.lat = lat;
+      if (Number.isFinite(lon)) LOCATION.lon = lon;
+      if (typeof data.timeZone === "string" && data.timeZone.trim()) {
+        LOCATION.timeZone = data.timeZone.trim();
+      }
+      if (typeof data.zip === "string" && data.zip.trim()) {
+        LOCATION.zip = data.zip.trim();
+      }
+      solarCache = null;
+      solarCacheTs = 0;
+      if (typeof updateClock === "function") updateClock();
+      if (auto) {
+        dayNight = dayNightFromClock();
+        if (knob) knob.value = dayNight.toFixed(3);
+      }
+    };
+
+    const knobToPseudoHour = (k)=> ((k * 24 - 12 + 24) % 24);
+    const pseudoHourToKnob = (ph)=> ((ph + 12) % 24) / 24;
+
+    function dateForPseudoHour(ph, solar=null) {
+      const src = solar || refreshSolarCache(new Date());
+      if (!src || !src.parts) return null;
+      const h = Math.floor(ph) % 24;
+      const m = Math.floor((ph - Math.floor(ph)) * 60);
+      const s = Math.floor(((ph * 60) % 1) * 60);
+      const parts = { year: src.parts.year, month: src.parts.month, day: src.parts.day, hour: h, minute: m, second: s };
+      return dateFromParts(parts, src.offsetMinutes);
+    }
+
+    function pseudoHourForKnob(k) {
+      return knobToPseudoHour(clamp(k, 0, 1));
+    }
+
+    function nightnessForPseudoHour(ph) {
+      try {
+        const solar = refreshSolarCache(new Date());
+        const dt = dateForPseudoHour(ph, solar);
+        if (!dt) return null;
+        const sunPos = getSunPosition(dt, LOCATION.lat, LOCATION.lon);
+        return clamp(nightnessFromAltitude(sunPos.altitude), 0, 1);
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function hhmmForPseudoHour(ph) {
+      try {
+        const solar = refreshSolarCache(new Date());
+        if (!solar || !solar.parts) return null;
+        const dt = dateForPseudoHour(ph, solar);
+        if (!dt) {
+          const h = Math.floor(ph) % 24;
+          const m = Math.floor((ph - Math.floor(ph)) * 60);
+          return `${h.toString().padStart(2,"0")}:${m.toString().padStart(2,"0")}`;
+        }
+        const parts = zonedParts(dt, solar.timeZone);
+        return `${parts.hour.toString().padStart(2,"0")}:${parts.minute.toString().padStart(2,"0")}`;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    // UI controls
+    const knob = document.getElementById('knob'); // may be null
+    const phaseEl = document.getElementById('phase'); // may be null
+    const todEl = document.getElementById('tod'); // may be null
+    const autoBtn = document.getElementById('auto'); // may be null
+
+    let auto = true;
+    // 0..1 knob value where 0 = noon, 0.25 = sunset, 0.5 = midnight, 0.75 = sunrise
+    let autoHourOverride = null; // pseudo-hour (0..24) when auto off
+    let autoNightness = null;    // nightness driven by sun altitude when auto
+    let dayNight = dayNightFromClock();
+    if (knob) knob.value = dayNight.toFixed(3);
+
+    if (autoBtn) {
+      autoBtn.addEventListener('click', ()=>{
+        if (window.setAutoMode) {
+          window.setAutoMode(!auto);
+        } else {
+          auto = !auto;
+          autoBtn.textContent = auto ? 'Auto: ON' : 'Auto: OFF';
+        }
+      });
+    }
+
+    if (knob) {
+      knob.addEventListener('input', ()=>{
+        const value = parseFloat(knob.value);
+        if (window.setDayNight) {
+          window.setDayNight(value);
+        } else {
+          dayNight = value;
+          auto = false;
+          autoHourOverride = pseudoHourForKnob(dayNight);
+          autoNightness = nightnessForPseudoHour(autoHourOverride);
+          if (autoBtn) autoBtn.textContent = 'Auto: OFF';
+        }
+      });
+    }
+
+    function dayNightFromClock() {
+      const now = new Date();
+      autoHourOverride = null;
+      autoNightness = null;
+      try {
+        const solar = refreshSolarCache(now);
+        const parts = solar?.parts || zonedParts(now, LOCATION.timeZone);
+        const pseudoHour = (parts.hour || 0) + (parts.minute || 0) / 60 + (parts.second || 0) / 3600;
+        autoHourOverride = pseudoHour;
+
+        const sunPos = getSunPosition(now, LOCATION.lat, LOCATION.lon);
+        autoNightness = clamp(nightnessFromAltitude(sunPos.altitude), 0, 1);
+
+        return pseudoHourToKnob(pseudoHour);
+      } catch (err) {
+        const h = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+        autoHourOverride = h;
+        let k = (h - 12) / 12;
+        k = ((k % 1) + 1) % 1;
+        autoNightness = null;
+        return k;
+      }
+    }
+
+    // Expose controls for PyQt bridge
+    window.setDayNight = (k)=>{
+      const wasAuto = auto;
+      dayNight = clamp(k,0,1);
+      auto = false;
+      autoHourOverride = pseudoHourForKnob(dayNight);
+      autoNightness = nightnessForPseudoHour(autoHourOverride);
+      if (autoBtn) autoBtn.textContent = 'Auto: OFF';
+      if (knob) knob.value = dayNight.toFixed(3);
+      if (wasAuto && !suppressPreferenceSync) {
+        fireAndForgetCommand("space.daynight.auto", { enabled: false });
+      }
+    };
+    window.setAutoMode = (on, persist = true)=>{
+      const next = !!on;
+      const changed = auto !== next;
+      auto = next;
+      if (!auto) {
+        autoHourOverride = pseudoHourForKnob(dayNight);
+        autoNightness = nightnessForPseudoHour(autoHourOverride);
+      } else {
+        // snap to current clock immediately
+        dayNight = dayNightFromClock();
+        if (knob) knob.value = dayNight.toFixed(3);
+      }
+      if (autoBtn) autoBtn.textContent = auto ? 'Auto: ON' : 'Auto: OFF';
+      if (persist && changed && !suppressPreferenceSync) {
+        fireAndForgetCommand("space.daynight.auto", { enabled: auto });
+      }
+    };
+    window.getDayNight = ()=> dayNight;
+    window.setNodeSpeedMult = (k)=>{
+      nodeSpeedMult = clamp(k, 0.1, 2.0);
+      if (uiSync.nodeSpeed) uiSync.nodeSpeed(nodeSpeedMult);
+    };
+    window.setShooterRate = (k)=>{
+      shooterRate = clamp(k, 0.1, 2.0);
+      if (uiSync.shooterRate) uiSync.shooterRate(shooterRate);
+    };
+    window.setDustAlphaMult = (k)=>{
+      dustAlphaMult = clamp(k, 0.1, 2.0);
+      if (uiSync.dust) uiSync.dust(dustAlphaMult);
+    };
+    window.setDustDensity = (k)=>{
+      dustDensityMult = clamp(k, 0.1, 3.0);
+      dustCountTarget = Math.floor(DUST_COUNT * dustDensityMult);
+      if (dust.length > dustCountTarget) {
+        dust.length = dustCountTarget;
+      } else {
+        const spawnW = sceneSpawnWidth();
+        const spawnH = sceneSpawnHeight();
+        const toAdd = dustCountTarget - dust.length;
+        for (let i=0;i<toAdd;i++) {
+          dust.push({
+            x: rand(0,spawnW), y: rand(0,spawnH),
+            r: rand(0.4, 1.2),
+            a: rand(0.05, 0.18),
+          });
+        }
+      }
+      if (uiSync.dust) uiSync.dust(dustDensityMult);
+    };
+    window.setCometRate = (k)=>{
+      cometRate = clamp(k, 0.1, 2.0);
+      if (uiSync.cometRate) uiSync.cometRate(cometRate);
+    };
+    window.setNodeCount = (count)=>{
+      nodeCountTarget = Math.max(10, Math.min(240, Math.floor(count)));
+      // grow or shrink immediately
+      if (nodes.length > nodeCountTarget) {
+        nodes.length = nodeCountTarget;
+      } else {
+        const spawnW = sceneSpawnWidth();
+        const spawnH = sceneSpawnHeight();
+        const toAdd = nodeCountTarget - nodes.length;
+        for (let i=0;i<toAdd;i++) {
+          const ang = Math.random()*Math.PI*2;
+          const sp = rand(6, 18);
+          const baseR = rand(2.4, 5.2);
+          nodes.push({
+            x: rand(0,spawnW), y: rand(0,spawnH),
+            vx: Math.cos(ang)*sp, vy: Math.sin(ang)*sp,
+            r: baseR,
+            baseR,
+            z: Math.random(),
+            bandOffset: Math.random(),
+            noteOffset: Math.random(),
+            bandIndex: 0,
+            eq: 0,
+            px: null, py: null,
+          });
+        }
+      }
+      if (uiSync.nodeCount) uiSync.nodeCount(nodeCountTarget);
+    };
+    window.setStarCount = (count)=>{
+      starCountTarget = Math.max(100, Math.min(1200, Math.floor(count)));
+      if (stars.length > starCountTarget) {
+        stars.length = starCountTarget;
+      } else {
+        const spawnW = sceneSpawnWidth();
+        const spawnH = sceneSpawnHeight();
+        const toAdd = starCountTarget - stars.length;
+        for (let i=0;i<toAdd;i++) {
+          const layer = Math.random()<0.42 ? 0 : (Math.random()<0.70 ? 1 : 2);
+          const rRange = layer===0 ? [0.55,1.25] : (layer===1 ? [0.75,1.95] : [1.0,3.0]);
+          stars.push({
+            x: rand(0,spawnW),
+            y: rand(0,spawnH),
+            r: rand(rRange[0], rRange[1]),
+            layer,
+            tw: Math.random()*10,
+            twSpeed: rand(0.6,2.4) * (layer===0 ? 0.6 : 1.0),
+          });
+        }
+      }
+      if (uiSync.starCount) uiSync.starCount(starCountTarget);
+    };
+    window.setStarAlpha = (k)=>{
+      starAlphaMult = clamp(k, 0.1, 2.0);
+      if (uiSync.starAlpha) uiSync.starAlpha(starAlphaMult);
+    };
+    window.setLinkAlpha = (k)=>{
+      linkAlphaMult = clamp(k, 0.1, 2.0);
+      if (uiSync.linkAlpha) uiSync.linkAlpha(linkAlphaMult);
+    };
+    window.setLinkDistance = (k)=>{
+      linkDistMult = clamp(k, 0.3, 2.0);
+      if (uiSync.linkDist) uiSync.linkDist(linkDistMult);
+    };
+    window.setCamSpeed = (k)=>{
+      const clamped = clamp(k, 0.2, 2.5);
+      const ratio = clamped / camSpeedMult;
+      camSpeedMult = clamped;
+      camVX *= ratio;
+      camVY *= ratio;
+      if (uiSync.camSpeed) uiSync.camSpeed(camSpeedMult);
+    };
+    window.setNebula = (k)=>{
+      nebulaMult = clamp(k, 0.2, 3.0);
+      if (uiSync.nebula) uiSync.nebula(nebulaMult);
+    };
+    let audioHue = 210;
+    let audioMix = 0.0;
+    let audioPulse = 0.0;
+    let audioVivid = 0.0;
+    let audioRest = 0.0;
+    let audioSpread = 12.0;
+    let audioBands = [];
+    let audioEnergy = 0.0;
+    let audioPunch = 0.0;
+    let audioComplexity = 0.0;
+    let audioFlow = 0.0;
+    let audioLow = 0.0;
+    let audioMid = 0.0;
+    let audioHigh = 0.0;
+    let audioWarmth = 0.5;
+    let audioAir = 0.5;
+    let audioBandPhase = 0.0;
+    let noteGridEnabled = false;
+    let noteGridMode = 'pitch-class';
+    let noteGridLayout = 'auto';
+    let noteLevels = [];
+    let notePhase = 0.0;
+    window.setAudioPalette = (hue, mix, pulse, vivid, rest, spread)=>{
+      audioHue = ((parseFloat(hue) || 0) % 360 + 360) % 360;
+      audioMix = clamp(parseFloat(mix) || 0, 0, 1);
+      audioPulse = clamp(parseFloat(pulse) || 0, 0, 1);
+      audioVivid = clamp(parseFloat(vivid) || 0, 0, 1);
+      audioRest = clamp(parseFloat(rest) || 0, 0, 1);
+      audioSpread = clamp(parseFloat(spread) || 0, 4, 60);
+    };
+    window.setAudioBands = (bands, energy, punch, complexity, flow, warmth, air)=>{
+      if (Array.isArray(bands)) {
+        audioBands = bands.map((v)=>clamp(parseFloat(v) || 0, 0, 1));
+      }
+      audioEnergy = clamp(parseFloat(energy) || 0, 0, 1);
+      audioPunch = clamp(parseFloat(punch) || 0, 0, 1);
+      audioComplexity = clamp(parseFloat(complexity) || 0, 0, 1);
+      audioFlow = clamp(parseFloat(flow) || 0, 0, 1);
+      const warmVal = parseFloat(warmth);
+      if (Number.isFinite(warmVal)) {
+        audioWarmth = clamp(warmVal, 0, 1);
+      }
+      const airVal = parseFloat(air);
+      if (Number.isFinite(airVal)) {
+        audioAir = clamp(airVal, 0, 1);
+      }
+      const count = audioBands.length;
+      if (count) {
+        const third = Math.max(1, Math.floor(count / 3));
+        const lowEnd = third;
+        const midEnd = third * 2;
+        let lowSum = 0;
+        let midSum = 0;
+        let highSum = 0;
+        for (let i = 0; i < count; i++) {
+          if (i < lowEnd) lowSum += audioBands[i];
+          else if (i < midEnd) midSum += audioBands[i];
+          else highSum += audioBands[i];
+        }
+        const lowCount = Math.max(1, lowEnd);
+        const midCount = Math.max(1, Math.min(third, count - lowEnd));
+        const highCount = Math.max(1, count - midEnd);
+        audioLow = lowSum / lowCount;
+        audioMid = midSum / midCount;
+        audioHigh = highSum / highCount;
+      } else {
+        audioLow = 0.0;
+        audioMid = 0.0;
+        audioHigh = 0.0;
+      }
+    };
+    window.setNoteGrid = (enabled, mode, layout)=>{
+      noteGridEnabled = !!enabled;
+      noteGridMode = (mode || 'pitch-class').toString();
+      noteGridLayout = (layout || 'auto').toString();
+      if (uiSync.noteGrid) uiSync.noteGrid(noteGridEnabled, noteGridMode, noteGridLayout);
+    };
+    window.setNoteLevels = (levels)=>{
+      if (Array.isArray(levels)) {
+        noteLevels = levels.map((v)=>clamp(parseFloat(v) || 0, 0, 1));
+      } else {
+        noteLevels = [];
+      }
+    };
+
+    function setText(el, text) {
+      if (el) el.textContent = text;
+    }
+
+    function bindSlider(inputId, outputId, setter, formatter, coerce) {
+      const input = document.getElementById(inputId);
+      const output = document.getElementById(outputId);
+      if (!input) return null;
+      const format = formatter || ((v)=>v.toFixed(2));
+      const mapValue = coerce || ((v)=>v);
+      const apply = (value)=>{
+        const v = mapValue(value);
+        input.value = v;
+        if (output) output.textContent = format(v);
+      };
+      input.addEventListener('input', ()=>{
+        const raw = parseFloat(input.value);
+        if (!Number.isFinite(raw)) return;
+        const v = mapValue(raw);
+        if (output) output.textContent = format(v);
+        if (setter) setter(v);
+      });
+      return apply;
+    }
+
+    function getZonedPartsSafe(date, timeZone) {
+      try {
+        return zonedParts(date, timeZone);
+      } catch (err) {
+        return {
+          year: date.getFullYear(),
+          month: date.getMonth() + 1,
+          day: date.getDate(),
+          hour: date.getHours(),
+          minute: date.getMinutes(),
+          second: date.getSeconds(),
+        };
+      }
+    }
+
+    async function coreFetch(path, options) {
+      const opts = options ? { ...options } : {};
+      const headers = opts.headers ? { ...opts.headers } : {};
+      if (opts.body && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
+        headers["Content-Type"] = "application/json";
+        opts.body = JSON.stringify(opts.body);
+      }
+      opts.headers = headers;
+      try {
+        const res = await fetch(path, opts);
+        const text = await res.text();
+        if (!text) return null;
+        return JSON.parse(text);
+      } catch (err) {
+        return null;
+      }
+    }
+
+    async function ensureBridge(maxAttempts = 25) {
+      if (bridgeObject) return bridgeObject;
+      if (bridgeReadyPromise) return bridgeReadyPromise;
+      bridgeReadyPromise = (async ()=>{
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          const hasTransport = !!(window.qt && window.qt.webChannelTransport);
+          if (hasTransport && typeof QWebChannel === "function") {
+            const connected = await new Promise((resolve)=>{
+              try {
+                new QWebChannel(window.qt.webChannelTransport, (channel)=>{
+                  const obj = (channel && channel.objects) ? channel.objects.coghudBridge : null;
+                  resolve(obj || null);
+                });
+              } catch (err) {
+                resolve(null);
+              }
+            });
+            if (connected) {
+              bridgeObject = connected;
+              return bridgeObject;
+            }
+          }
+          await new Promise((resolve)=>setTimeout(resolve, 100));
+        }
+        bridgeReadyPromise = null;
+        return null;
+      })();
+      const resolved = await bridgeReadyPromise;
+      if (!resolved) {
+        bridgeReadyPromise = null;
+      }
+      return resolved;
+    }
+
+    async function bridgeCall(method, ...args) {
+      const bridge = await ensureBridge();
+      if (!bridge || typeof bridge[method] !== "function") return null;
+      return new Promise((resolve)=>{
+        try {
+          bridge[method](...args, (result)=>resolve(result));
+        } catch (err) {
+          resolve(null);
+        }
+      });
+    }
+
+    async function bridgeRequest(op, fields) {
+      const payload = { op };
+      if (fields && typeof fields === "object") {
+        Object.assign(payload, fields);
+      }
+      const apiResult = await bridgeCall("request", payload);
+      if (apiResult && typeof apiResult === "object") {
+        return apiResult;
+      }
+      return null;
+    }
+
+    async function sendCommand(command, args) {
+      const requestResult = await bridgeRequest("command", {
+        command,
+        payload: args || {},
+      });
+      if (requestResult && typeof requestResult === "object") {
+        if (requestResult.data && typeof requestResult.data === "object") {
+          return requestResult.data;
+        }
+        if (requestResult.ok) return { ok: true };
+        return { ok: false, error: requestResult.error || "Command failed" };
+      }
+      const bridgeResult = await bridgeCall("command", command, args || {});
+      if (bridgeResult && typeof bridgeResult === "object") {
+        return bridgeResult;
+      }
+      return coreFetch("/api/command", {
+        method: "POST",
+        body: { command, args: args || {} },
+      });
+    }
+
+    function fireAndForgetCommand(command, args) {
+      sendCommand(command, args || {}).catch(()=>{});
+    }
+
+    function applyAudioEvent(data) {
+      if (!data) return;
+      if (data.params) {
+        const p = data.params;
+        if (typeof p.nodeSpeed === "number") window.setNodeSpeedMult(p.nodeSpeed);
+        if (typeof p.shooterRate === "number") window.setShooterRate(p.shooterRate);
+        if (typeof p.cometRate === "number") window.setCometRate(p.cometRate);
+        if (typeof p.dust === "number") {
+          window.setDustAlphaMult(p.dust);
+          window.setDustDensity(p.dust);
+        }
+        if (typeof p.linkAlpha === "number") window.setLinkAlpha(p.linkAlpha);
+        if (typeof p.camSpeed === "number") window.setCamSpeed(p.camSpeed);
+        if (typeof p.nebula === "number") window.setNebula(p.nebula);
+        if (typeof p.starAlpha === "number") window.setStarAlpha(p.starAlpha);
+        if (typeof p.linkDist === "number") window.setLinkDistance(p.linkDist);
+        if (typeof p.nodeCount === "number") window.setNodeCount(p.nodeCount);
+        if (typeof p.starCount === "number") window.setStarCount(p.starCount);
+      }
+      const palette = data.palette || {};
+      if (typeof window.setAudioPalette === "function") {
+        window.setAudioPalette(
+          palette.hue || 0,
+          palette.mix || 0,
+          palette.pulse || 0,
+          palette.vivid || 0,
+          palette.rest || 0,
+          palette.spread || 0
+        );
+      }
+      if (typeof window.setAudioBands === "function") {
+        window.setAudioBands(
+          data.bands || [],
+          data.energy || 0,
+          data.punch || 0,
+          data.complexity || 0,
+          data.flow || 0,
+          data.warmth || 0,
+          data.air || 0
+        );
+      }
+      if (typeof window.setNoteLevels === "function") {
+        window.setNoteLevels(data.noteLevels || []);
+      }
+    }
+
+    function handleSpaceEventPayload(payload) {
+      if (!payload) return;
+      if (payload.app && payload.app !== "space") return;
+      if (payload.type === "audio") {
+        applyAudioEvent(payload.data || {});
+      } else if (payload.type === "audio_status") {
+        const statusEl = document.getElementById('audio-status');
+        if (statusEl && payload.data && payload.data.message) {
+          statusEl.textContent = payload.data.message;
+        }
+      } else if (payload.type === "location") {
+        if (payload.data) {
+          window.setLocation(payload.data);
+        }
+      }
+    }
+
+    async function pollAudioFrame() {
+      if (!audioEnabled) return;
+      const result = await sendCommand("space.audio.peek", { since: lastAudioSeq });
+      if (!result || result.ok === false) return;
+      if (typeof result.enabled === "boolean" && !result.enabled) {
+        audioEnabled = false;
+        const animToggle = document.getElementById('anim-toggle');
+        if (animToggle) animToggle.textContent = 'Audio: OFF';
+        stopAudioPolling();
+        return;
+      }
+      if (!result.changed || !result.payload) return;
+      if (Number.isFinite(result.seq)) {
+        lastAudioSeq = result.seq;
+      }
+      applyAudioEvent(result.payload);
+    }
+
+    function startAudioPolling() {
+      if (audioPollTimer !== null) return;
+      audioPollTimer = setInterval(pollAudioFrame, 80);
+    }
+
+    function stopAudioPolling() {
+      if (audioPollTimer === null) return;
+      clearInterval(audioPollTimer);
+      audioPollTimer = null;
+    }
+
+    async function connectBridgeEvents() {
+      if (bridgeEventsBound) return true;
+      const bridge = await ensureBridge();
+      if (!bridge) {
+        return false;
+      }
+      let connected = false;
+      if (bridge.eventReceived && typeof bridge.eventReceived.connect === "function") {
+        bridge.eventReceived.connect((eventType, data)=>{
+          handleSpaceEventPayload({
+            app: "space",
+            type: eventType,
+            data: data || {},
+          });
+        });
+        connected = true;
+      } else if (bridge.apiEvent && typeof bridge.apiEvent.connect === "function") {
+        bridge.apiEvent.connect((event)=>{
+          if (!event || typeof event !== "object") return;
+          handleSpaceEventPayload({
+            app: event.plugin_id || "space",
+            type: event.event || "",
+            data: event.payload || {},
+          });
+        });
+        connected = true;
+      }
+      if (!connected) return false;
+      bridgeEventsBound = true;
+      return true;
+    }
+
+    async function connectEvents() {
+      const hasBridge = await connectBridgeEvents();
+      if (hasBridge) return;
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${proto}://${location.host}/events`;
+      try {
+        eventSocket = new WebSocket(wsUrl);
+      } catch (err) {
+        return;
+      }
+      eventSocket.onmessage = (event)=>{
+        let payload = null;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (err) {
+          return;
+        }
+        handleSpaceEventPayload(payload);
+      };
+      eventSocket.onclose = ()=>{
+        setTimeout(()=>{ connectEvents(); }, 1500);
+      };
+    }
+
+    async function loadInitialState() {
+      let data = null;
+      const requestState = await bridgeRequest("state", {});
+      if (requestState && requestState.ok && requestState.data && requestState.data.state) {
+        data = { ok: true, state: requestState.data.state };
+      } else {
+        data = await bridgeCall("state");
+      }
+      if (!data || !data.ok) {
+        data = await coreFetch("/api/state?app=space");
+      }
+      if (!data || !data.ok) return;
+      const state = data.state || {};
+      if (state.location) {
+        window.setLocation(state.location);
+      }
+      if (state.anim && state.anim.mode) {
+        const animModeSel = document.getElementById('anim-mode');
+        if (animModeSel) animModeSel.value = state.anim.mode;
+        window.setAnimationMode(state.anim.mode);
+      }
+      if (state.view) {
+        const view = state.view;
+        if (typeof view.backgroundEnabled === "boolean") {
+          backgroundEnabled = !!view.backgroundEnabled;
+          const bgToggle = document.getElementById('bg-toggle');
+          if (bgToggle) {
+            bgToggle.textContent = backgroundEnabled ? 'Background: ON' : 'Background: OFF';
+          }
+        }
+        if (typeof view.dayNightAuto === "boolean" && typeof window.setAutoMode === "function") {
+          suppressPreferenceSync = true;
+          try {
+            window.setAutoMode(!!view.dayNightAuto, false);
+          } finally {
+            suppressPreferenceSync = false;
+          }
+        }
+      }
+      if (state.note) {
+        noteGridEnabled = !!state.note.enabled;
+        const mode = state.note.mode || noteGridMode;
+        const layout = state.note.layout || noteGridLayout;
+        window.setNoteGrid(noteGridEnabled, mode, layout);
+      }
+      if (state.audio) {
+        const audio = state.audio;
+        audioEnabled = !!audio.enabled;
+        if (Number.isFinite(audio.seq)) {
+          lastAudioSeq = audio.seq;
+        }
+        updateAudioDevices(audio);
+        const animToggle = document.getElementById('anim-toggle');
+        if (animToggle) animToggle.textContent = audioEnabled ? 'Audio: ON' : 'Audio: OFF';
+      }
+    }
+
+    async function refreshAudioDevicesFromState() {
+      let data = null;
+      const requestState = await bridgeRequest("state", {});
+      if (requestState && requestState.ok && requestState.data && requestState.data.state) {
+        data = { ok: true, state: requestState.data.state };
+      } else {
+        data = await bridgeCall("state");
+      }
+      if (!data || !data.ok) {
+        data = await coreFetch("/api/state?app=space");
+      }
+      if (!data || !data.ok || !data.state || !data.state.audio) return false;
+      updateAudioDevices(data.state.audio);
+      return true;
+    }
+
+    async function refreshAudioDevicesFromBrowser() {
+      if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') {
+        return false;
+      }
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const outputs = devices.filter((d)=>d && d.kind === 'audiooutput');
+        const names = outputs.map((d, idx)=>d.label || `Output ${idx + 1}`);
+        const currentSel = document.getElementById('audio-device');
+        const selected = currentSel ? currentSel.selectedIndex : 0;
+        updateAudioDevices({
+          ready: outputs.length > 0,
+          captureReady: false,
+          devices: names,
+          selected: selected >= 0 ? selected : 0,
+          message: outputs.length ? 'Device list refreshed' : 'No audio output devices',
+        });
+        return outputs.length > 0;
+      } catch (err) {
+        return false;
+      }
+    }
+
+    async function refreshAudioDevices() {
+      const fromState = await refreshAudioDevicesFromState();
+      if (!fromState) {
+        await refreshAudioDevicesFromBrowser();
+      }
+    }
+
+    function initUi() {
+      const hud = document.getElementById('hud');
+      const hudToggle = document.getElementById('hud-toggle');
+      const hudPanel = document.getElementById('hud-panel');
+      const bgToggle = document.getElementById('bg-toggle');
+      const animToggle = document.getElementById('anim-toggle');
+      const animModeSel = document.getElementById('anim-mode');
+      const noteToggle = document.getElementById('note-toggle');
+      const noteModeSel = document.getElementById('note-mode');
+      const noteLayoutSel = document.getElementById('note-layout');
+      const audioDeviceSel = document.getElementById('audio-device');
+      const audioStatusEl = document.getElementById('audio-status');
+
+      if (hud && hudToggle && hudPanel) {
+        let hudPinned = false;
+        let hudHovered = false;
+        let hudNear = false;
+        let hudSelectActive = false;
+        let collapseTimer = null;
+        const HUD_NEAR_WIDTH = 520;
+        const HUD_NEAR_HEIGHT = 220;
+
+        const syncHudToggle = ()=>{
+          hudToggle.textContent = hudPanel.classList.contains('collapsed') ? 'Controls' : 'Hide Controls';
+        };
+        const isFocusWithinHud = ()=>{
+          const active = document.activeElement;
+          if (!active || !hud.contains(active)) return false;
+          const tag = (active.tagName || '').toUpperCase();
+          return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+        };
+        const setHudPinned = (pinned)=>{
+          hudPinned = !!pinned;
+          hud.classList.toggle('pinned', hudPinned);
+        };
+        const refreshHudShell = ()=>{
+          const panelOpen = !hudPanel.classList.contains('collapsed');
+          const shouldShow = hudNear || hudHovered || hudPinned || panelOpen || hudSelectActive || isFocusWithinHud();
+          hud.classList.toggle('near', shouldShow);
+        };
+        const clearCollapseTimer = ()=>{
+          if (collapseTimer !== null) {
+            clearTimeout(collapseTimer);
+            collapseTimer = null;
+          }
+        };
+        const collapseHudPanel = ()=>{
+          if (hudPinned || hudSelectActive || isFocusWithinHud()) return;
+          hudPanel.classList.add('collapsed');
+          syncHudToggle();
+          refreshHudShell();
+        };
+        const scheduleCollapse = (delay = 140)=>{
+          clearCollapseTimer();
+          collapseTimer = setTimeout(()=>{
+            collapseTimer = null;
+            if (hudNear || hudHovered || hudPinned || hudSelectActive || isFocusWithinHud()) {
+              refreshHudShell();
+              return;
+            }
+            collapseHudPanel();
+          }, delay);
+        };
+        const showHudPanel = (pinned)=>{
+          hudPanel.classList.remove('collapsed');
+          setHudPinned(pinned);
+          syncHudToggle();
+          refreshHudShell();
+        };
+        const hideHudPanel = ()=>{
+          hudPanel.classList.add('collapsed');
+          setHudPinned(false);
+          try { hudToggle.blur(); } catch (err) {}
+          syncHudToggle();
+          refreshHudShell();
+        };
+        const isNearHudRegion = (x, y)=>{
+          return x >= 0 && y >= 0 && x <= Math.min(window.innerWidth, HUD_NEAR_WIDTH) && y <= HUD_NEAR_HEIGHT;
+        };
+
+        hideHudPanel();
+        hudToggle.addEventListener('click', ()=>{
+          if (hudPanel.classList.contains('collapsed')) {
+            showHudPanel(false);
+          } else {
+            hideHudPanel();
+          }
+        });
+        hud.addEventListener('mouseenter', ()=>{
+          hudHovered = true;
+          clearCollapseTimer();
+          refreshHudShell();
+        });
+        hud.addEventListener('mouseleave', ()=>{
+          hudHovered = false;
+          refreshHudShell();
+          scheduleCollapse(180);
+        });
+        document.addEventListener('mousemove', (event)=>{
+          hudNear = isNearHudRegion(event.clientX, event.clientY);
+          refreshHudShell();
+          if (!hudNear && !hudHovered && !hudPinned) {
+            scheduleCollapse(180);
+          } else {
+            clearCollapseTimer();
+          }
+        }, { passive: true });
+
+        const hudSelects = hudPanel.querySelectorAll('select');
+        hudSelects.forEach((sel)=>{
+          const beginSelect = ()=>{
+            hudSelectActive = true;
+            clearCollapseTimer();
+            refreshHudShell();
+          };
+          const endSelect = ()=>{
+            setTimeout(()=>{
+              hudSelectActive = false;
+              refreshHudShell();
+              scheduleCollapse(200);
+            }, 160);
+          };
+          sel.addEventListener('pointerdown', beginSelect);
+          sel.addEventListener('focus', beginSelect);
+          sel.addEventListener('change', endSelect);
+          sel.addEventListener('blur', endSelect);
+        });
+
+        window.toggleHudPanel = ()=>{
+          if (hudPanel.classList.contains('collapsed')) {
+            showHudPanel(true);
+          } else {
+            hideHudPanel();
+          }
+        };
+        refreshHudShell();
+      } else {
+        window.toggleHudPanel = ()=>{};
+      }
+      const hudBar = document.getElementById('hud-bar');
+      if (hudPanel) {
+        hudPanel.addEventListener('click', (event)=>event.stopPropagation());
+      }
+      if (hudBar) {
+        hudBar.addEventListener('click', (event)=>event.stopPropagation());
+      }
+
+      uiSync.nodeSpeed = bindSlider('node-speed', 'node-speed-val', window.setNodeSpeedMult, (v)=>v.toFixed(2));
+      uiSync.shooterRate = bindSlider('shooter-rate', 'shooter-rate-val', window.setShooterRate, (v)=>v.toFixed(2));
+      uiSync.starAlpha = bindSlider('star-alpha', 'star-alpha-val', window.setStarAlpha, (v)=>v.toFixed(2));
+      uiSync.dust = bindSlider(
+        'dust',
+        'dust-val',
+        (v)=>{ window.setDustAlphaMult(v); window.setDustDensity(v); },
+        (v)=>v.toFixed(2)
+      );
+      uiSync.cometRate = bindSlider('comet-rate', 'comet-rate-val', window.setCometRate, (v)=>v.toFixed(2));
+      uiSync.nodeCount = bindSlider('node-count', 'node-count-val', window.setNodeCount, (v)=>Math.round(v).toString(), (v)=>Math.round(v));
+      uiSync.starCount = bindSlider('star-count', 'star-count-val', window.setStarCount, (v)=>Math.round(v).toString(), (v)=>Math.round(v));
+      uiSync.linkAlpha = bindSlider('link-alpha', 'link-alpha-val', window.setLinkAlpha, (v)=>v.toFixed(2));
+      uiSync.linkDist = bindSlider('link-dist', 'link-dist-val', window.setLinkDistance, (v)=>v.toFixed(2));
+      uiSync.camSpeed = bindSlider('cam-speed', 'cam-speed-val', window.setCamSpeed, (v)=>v.toFixed(2));
+      uiSync.nebula = bindSlider('nebula', 'nebula-val', window.setNebula, (v)=>v.toFixed(2));
+
+      uiSync.animMode = (key)=>{
+        if (animModeSel) animModeSel.value = key;
+      };
+      uiSync.noteGrid = (enabled, mode, layout)=>{
+        if (noteToggle) noteToggle.textContent = enabled ? 'Note Grid: ON' : 'Note Grid: OFF';
+        if (noteModeSel) noteModeSel.value = mode;
+        if (noteLayoutSel) noteLayoutSel.value = layout;
+      };
+
+      if (uiSync.nodeSpeed) uiSync.nodeSpeed(nodeSpeedMult);
+      if (uiSync.shooterRate) uiSync.shooterRate(shooterRate);
+      if (uiSync.starAlpha) uiSync.starAlpha(starAlphaMult);
+      if (uiSync.dust) uiSync.dust(dustAlphaMult);
+      if (uiSync.cometRate) uiSync.cometRate(cometRate);
+      if (uiSync.nodeCount) uiSync.nodeCount(nodeCountTarget);
+      if (uiSync.starCount) uiSync.starCount(starCountTarget);
+      if (uiSync.linkAlpha) uiSync.linkAlpha(linkAlphaMult);
+      if (uiSync.linkDist) uiSync.linkDist(linkDistMult);
+      if (uiSync.camSpeed) uiSync.camSpeed(camSpeedMult);
+      if (uiSync.nebula) uiSync.nebula(nebulaMult);
+      if (uiSync.noteGrid) uiSync.noteGrid(noteGridEnabled, noteGridMode, noteGridLayout);
+
+      if (bgToggle) {
+        const syncBgToggle = ()=> {
+          bgToggle.textContent = backgroundEnabled ? 'Background: ON' : 'Background: OFF';
+        };
+        syncBgToggle();
+        bgToggle.addEventListener('click', ()=>{
+          backgroundEnabled = !backgroundEnabled;
+          syncBgToggle();
+          fireAndForgetCommand("space.background.enable", { enabled: backgroundEnabled });
+        });
+      }
+
+      if (animToggle) {
+        const syncAudioToggle = ()=>{
+          animToggle.textContent = audioEnabled ? 'Audio: ON' : 'Audio: OFF';
+        };
+        syncAudioToggle();
+        animToggle.addEventListener('click', async ()=>{
+          audioEnabled = !audioEnabled;
+          syncAudioToggle();
+          if (audioEnabled && animModeSel) {
+            window.setAnimationMode(animModeSel.value);
+          }
+          const result = await sendCommand("space.audio.enable", { enabled: audioEnabled });
+          if (result && typeof result.enabled === "boolean") {
+            audioEnabled = !!result.enabled;
+            syncAudioToggle();
+          } else if (result && result.ok === false) {
+            audioEnabled = false;
+            syncAudioToggle();
+          }
+          if (result && result.message && audioStatusEl) {
+            audioStatusEl.textContent = result.message;
+          }
+          if (audioEnabled) {
+            startAudioPolling();
+          } else {
+            stopAudioPolling();
+          }
+          refreshAudioDevicesFromState();
+        });
+      }
+
+      if (animModeSel) {
+        animModeSel.addEventListener('change', async ()=>{
+          window.setAnimationMode(animModeSel.value);
+          await sendCommand("space.anim.mode", { mode: animModeSel.value });
+        });
+      }
+
+      if (noteToggle || noteModeSel || noteLayoutSel) {
+        const applyNoteGrid = async ()=>{
+          const enabled = !!noteGridEnabled;
+          const mode = noteModeSel ? noteModeSel.value : noteGridMode;
+          const layout = noteLayoutSel ? noteLayoutSel.value : noteGridLayout;
+          window.setNoteGrid(enabled, mode, layout);
+          await sendCommand("space.note.grid", { enabled, mode, layout });
+        };
+        if (noteToggle) {
+          noteToggle.addEventListener('click', async ()=>{
+            noteGridEnabled = !noteGridEnabled;
+            await applyNoteGrid();
+          });
+        }
+        if (noteModeSel) noteModeSel.addEventListener('change', applyNoteGrid);
+        if (noteLayoutSel) noteLayoutSel.addEventListener('change', applyNoteGrid);
+      }
+
+      if (audioDeviceSel) {
+        audioDeviceSel.addEventListener('change', async ()=>{
+          const result = await sendCommand("space.audio.device.select", {
+            index: audioDeviceSel.selectedIndex,
+          });
+          if (result && typeof result.enabled === "boolean") {
+            audioEnabled = !!result.enabled;
+            if (animToggle) {
+              animToggle.textContent = audioEnabled ? 'Audio: ON' : 'Audio: OFF';
+            }
+          }
+          if (result && result.message && audioStatusEl) {
+            audioStatusEl.textContent = result.message;
+          } else if (audioStatusEl) {
+            audioStatusEl.textContent = 'Device selected';
+          }
+          if (audioEnabled) {
+            startAudioPolling();
+          } else {
+            stopAudioPolling();
+          }
+          refreshAudioDevicesFromState();
+        });
+      }
+
+      connectEvents();
+      loadInitialState().finally(()=>{
+        if (audioEnabled) {
+          startAudioPolling();
+        } else {
+          stopAudioPolling();
+        }
+        refreshAudioDevices();
+      });
+      if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+        navigator.mediaDevices.addEventListener('devicechange', refreshAudioDevices);
+      }
+      if (audioDeviceRefreshTimer !== null) {
+        clearInterval(audioDeviceRefreshTimer);
+      }
+      audioDeviceRefreshTimer = setInterval(refreshAudioDevices, 5000);
+    }
+
+    function updateAudioDevices(info) {
+      const audioDeviceSel = document.getElementById('audio-device');
+      const audioStatusEl = document.getElementById('audio-status');
+      const animToggle = document.getElementById('anim-toggle');
+      if (!audioDeviceSel) return;
+      const devices = Array.isArray(info && info.devices) ? info.devices : [];
+      const signature = JSON.stringify(devices);
+      const prevSignature = audioDeviceSel.dataset.signature || '';
+      const prevValue = audioDeviceSel.value;
+      const captureReady = !!(info && info.captureReady);
+
+      if (animToggle) {
+        animToggle.disabled = !captureReady;
+        animToggle.title = captureReady ? "" : "Audio reactivity requires numpy";
+      }
+
+      if (!info || !info.ready || !devices.length) {
+        audioDeviceSel.dataset.signature = '';
+        audioDeviceSel.innerHTML = '';
+        audioDeviceSel.disabled = true;
+        setText(audioStatusEl, (info && info.message) ? info.message : 'Audio unavailable');
+        return;
+      }
+
+      if (signature !== prevSignature) {
+        audioDeviceSel.innerHTML = '';
+        devices.forEach((name, idx)=>{
+          const opt = document.createElement('option');
+          opt.value = idx;
+          opt.textContent = name;
+          audioDeviceSel.appendChild(opt);
+        });
+        audioDeviceSel.dataset.signature = signature;
+      }
+      audioDeviceSel.disabled = false;
+      const preferredRaw = Number.isFinite(info.selected) ? info.selected : parseInt(prevValue || "0", 10);
+      const preferred = Number.isFinite(preferredRaw) ? preferredRaw : 0;
+      audioDeviceSel.selectedIndex = Math.max(0, Math.min(preferred, devices.length - 1));
+      if (info.message) {
+        setText(audioStatusEl, info.message);
+      } else {
+        setText(audioStatusEl, 'Ready');
+      }
+    }
+
+    const ANIM_MODE_PRESETS = {
+      focus: {
+        nodeSpeed: 0.55,
+        shooterRate: 0.35,
+        dustAlpha: 1.0,
+        dustDensity: 0.8,
+        cometRate: 0.5,
+        nodeCount: 80,
+        starCount: 650,
+        starAlpha: 1.4,
+        linkAlpha: 0.9,
+        linkDist: 0.95,
+        camSpeed: 1.2,
+        nebula: 2.0,
+      },
+      hyper: {
+        nodeSpeed: 1.5,
+        shooterRate: 1.6,
+        dustAlpha: 2.0,
+        dustDensity: 2.2,
+        cometRate: 1.8,
+        nodeCount: 180,
+        starCount: 1100,
+        starAlpha: 2.0,
+        linkAlpha: 1.7,
+        linkDist: 1.6,
+        camSpeed: 2.5,
+        nebula: 3.0,
+      },
+      minimal: {
+        nodeSpeed: 0.35,
+        shooterRate: 0.2,
+        dustAlpha: 0.6,
+        dustDensity: 0.6,
+        cometRate: 0.25,
+        nodeCount: 35,
+        starCount: 350,
+        starAlpha: 0.7,
+        linkAlpha: 0.5,
+        linkDist: 0.7,
+        camSpeed: 0.8,
+        nebula: 1.0,
+      },
+    };
+
+    window.setAnimationMode = (mode)=>{
+      const key = (mode || '').toLowerCase();
+      const preset = ANIM_MODE_PRESETS[key];
+      if (!preset) return false;
+      if (uiSync.animMode) uiSync.animMode(key);
+      window.setNodeSpeedMult(preset.nodeSpeed);
+      window.setShooterRate(preset.shooterRate);
+      window.setDustAlphaMult(preset.dustAlpha);
+      window.setDustDensity(preset.dustDensity);
+      window.setCometRate(preset.cometRate);
+      window.setNodeCount(preset.nodeCount);
+      window.setStarCount(preset.starCount);
+      window.setStarAlpha(preset.starAlpha);
+      window.setLinkAlpha(preset.linkAlpha);
+      window.setLinkDistance(preset.linkDist);
+      window.setCamSpeed(preset.camSpeed);
+      window.setNebula(preset.nebula);
+      return true;
+    };
+
+    // Tuning
+    const STAR_COUNT = 900;
+    const NODE_COUNT = 120;
+    const LINK_DIST = 190;
+    const LINK_DIST2 = LINK_DIST*LINK_DIST;
+    const SHOOTER_SPAWN_CHANCE = 0.012; // per frame
+    const COMET_SPAWN_CHANCE = 0.0045; // rarer, longer tails
+    const ASTEROID_COUNT = 38;
+    const DUST_COUNT = 320;
+
+    // Parallax camera drift
+    let camX = 0, camY = 0;
+    let camVX = rand(-26,26), camVY = rand(-26,26);
+
+    // Entities
+    const stars = [];
+    const nodes = [];
+    const shooters = [];
+    const comets = [];
+    const asteroids = [];
+    const dust = [];
+
+    let nodeSpeedMult = 0.85;
+    let shooterRate = 0.75;
+    let dustAlphaMult = 1.6;
+    let dustDensityMult = 1.4;
+    let dustCountTarget = Math.floor(DUST_COUNT * dustDensityMult);
+    let cometRate = 1.1;
+    let nodeCountTarget = NODE_COUNT;
+    let starCountTarget = STAR_COUNT;
+    let starAlphaMult = 2.0;
+    let linkAlphaMult = 1.25;
+    let linkDistMult = 1.2;
+    let camSpeedMult = 2.5;
+    let nebulaMult = 3.0;
+    let galaxyPhase = 0;
+    let camSpeedLast = 1.0;
+    let nebulaBlobs = [];
+
+    // Sun/moon orbit
+    let sunPhase = Math.random()*Math.PI*2;
+    let moonPhase = sunPhase + 1.85;
+
+    function resetScene() {
+      const spawnW = sceneSpawnWidth();
+      const spawnH = sceneSpawnHeight();
+      stars.length = 0;
+      nodes.length = 0;
+      shooters.length = 0;
+      comets.length = 0;
+      asteroids.length = 0;
+      dust.length = 0;
+      nebulaBlobs = [];
+
+      for (let i=0;i<starCountTarget;i++) {
+        const layer = Math.random()<0.42 ? 0 : (Math.random()<0.70 ? 1 : 2);
+        const rRange = layer===0 ? [0.55,1.25] : (layer===1 ? [0.75,1.95] : [1.0,3.0]);
+        stars.push({
+          x: rand(0,spawnW),
+          y: rand(0,spawnH),
+          r: rand(rRange[0], rRange[1]),
+          layer,
+          tw: Math.random()*10,
+          twSpeed: rand(0.6,2.4) * (layer===0 ? 0.6 : 1.0),
+        });
+      }
+
+      for (let i=0;i<nodeCountTarget;i++) {
+        const ang = Math.random()*Math.PI*2;
+        const sp = rand(6, 18);
+        const baseR = rand(2.4, 5.2);
+        nodes.push({
+          x: rand(0,spawnW), y: rand(0,spawnH),
+          vx: Math.cos(ang)*sp, vy: Math.sin(ang)*sp,
+          r: baseR,
+          baseR,
+          z: Math.random(),
+          bandOffset: Math.random(),
+          noteOffset: Math.random(),
+          bandIndex: 0,
+          eq: 0,
+          px: null, py: null, // trails
+        });
+      }
+
+      for (let i=0;i<ASTEROID_COUNT;i++) {
+        asteroids.push({
+          x: rand(0,spawnW), y: rand(0,spawnH),
+          vx: rand(-40,40), vy: rand(-40,40),
+          r: rand(0.8, 2.2),
+        });
+      }
+
+      for (let i=0;i<dustCountTarget;i++) {
+        dust.push({
+          x: rand(0,spawnW), y: rand(0,spawnH),
+          r: rand(0.4, 1.2),
+          a: rand(0.05, 0.18),
+        });
+      }
+
+      // nebula seeds
+      const blobCount = 7;
+      for (let i=0;i<blobCount;i++) {
+        nebulaBlobs.push({
+          fx: Math.random(),
+          fy: Math.random(),
+          fr: rand(0.35, 0.75),
+          hue: rand(190, 320),
+          alpha: rand(0.08, 0.18),
+        });
+      }
+    }
+    resetScene();
+    sceneReady = true;
+
+    function spawnShooter(x=null,y=null) {
+      let sx, sy;
+      if (x==null || y==null) {
+        const side = Math.random()<0.5 ? 'top' : 'left';
+        if (side==='top') { sx = rand(-W*0.15, W*0.85); sy = rand(-50, 70); }
+        else { sx = rand(-50, 70); sy = rand(-H*0.15, H*0.85); }
+      } else { sx=x; sy=y; }
+
+      const ang = rand(Math.PI*0.14, Math.PI*0.36);
+      const sp = rand(900, 1500);
+
+      const lifeMax = rand(0.55, 1.15);
+      shooters.push({
+        x: sx, y: sy,
+        vx: Math.cos(ang)*sp,
+        vy: Math.sin(ang)*sp,
+        lifeMax,
+        life: lifeMax,
+        length: rand(220, 420),
+      });
+    }
+    window.addEventListener('click', (e)=>spawnShooter(e.clientX-30, e.clientY-30));
+
+    // ---- 4 phases ----
+    const PHASE_LABELS = ["12am–6am", "6am–12pm", "12pm–6pm", "6pm–12am"];
+    const PHASES = [
+      // 12am-6am
+      { bgTop:[4,6,18],  bgBottom:[10,9,24],  neb1:"rgba(70,30,130,0.16)", neb2:"rgba(20,70,110,0.12)", link:[145,190,255], nodeGlow:[90,140,255],  starWarm:0.10 },
+      // 6am-12pm
+      { bgTop:[16,35,70], bgBottom:[130,110,120], neb1:"rgba(255,140,90,0.10)", neb2:"rgba(90,190,255,0.10)", link:[120,170,255], nodeGlow:[120,175,255], starWarm:0.35 },
+      // 12pm-6pm
+      { bgTop:[30,90,170], bgBottom:[170,210,255], neb1:"rgba(255,255,255,0.06)", neb2:"rgba(255,200,120,0.08)", link:[80,140,220],  nodeGlow:[110,170,240], starWarm:0.55 },
+      // 6pm-12am
+      { bgTop:[70,30,90], bgBottom:[8,10,20],   neb1:"rgba(255,120,60,0.12)", neb2:"rgba(160,90,255,0.10)", link:[165,190,255], nodeGlow:[140,160,255], starWarm:0.25 },
+    ];
+
+    function mixRGB(a,b,t){
+      return [Math.round(lerp(a[0],b[0],t)), Math.round(lerp(a[1],b[1],t)), Math.round(lerp(a[2],b[2],t))];
+    }
+    function rgbStr(rgb, a=1){ return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`; }
+    function mixHue(a, b, t) {
+      const delta = ((b - a + 540) % 360) - 180;
+      return (a + delta * t + 360) % 360;
+    }
+    function buildAudioStory() {
+      const warmth = clamp(audioWarmth, 0, 1);
+      const air = clamp(audioAir, 0, 1);
+      const bass = clamp(audioLow, 0, 1);
+      const sparkle = clamp(audioHigh, 0, 1);
+      const temp = clamp((warmth - air) * 0.85 + (bass - sparkle) * 0.65, -1, 1);
+      const moodHue = mixHue(210, 26, (temp + 1) * 0.5);
+      const moodMix = clamp(0.2 + Math.abs(temp) * 0.45 + audioComplexity * 0.2, 0, 0.8);
+      const hue = mixHue(audioHue, moodHue, moodMix);
+      const accentHue = mixHue(hue, (hue + (temp >= 0 ? 38 : -38) + 360) % 360, 0.45 + audioPunch * 0.25);
+      const vivid = clamp(audioVivid * (0.75 + audioEnergy * 0.55 + audioComplexity * 0.2) * (1 - audioRest * 0.7), 0, 1);
+      const mix = clamp(audioMix * (0.8 + audioEnergy * 0.5 + audioComplexity * 0.3) * (1 - audioRest * 0.8), 0, 1);
+      const spread = clamp(audioSpread * (0.7 + audioComplexity * 0.6 + audioFlow * 0.35 + sparkle * 0.25), 4, 60);
+      return { hue, accentHue, vivid, mix, spread, temp };
+    }
+
+    function currentPhaseAndBlend(k, hourOverride=null) {
+      // Map knob (or a real clock override) to a pseudo 24h clock where noon is at k=0, midnight at k=1
+      let pseudoHour;
+      if (hourOverride !== null && hourOverride !== undefined) {
+        pseudoHour = ((hourOverride % 24) + 24) % 24;
+      } else {
+        pseudoHour = pseudoHourForKnob(k);
+      }
+      const block = Math.floor(pseudoHour / 6);      // 0..3
+      const within = (pseudoHour - block*6) / 6;     // 0..1
+      const next = (block + 1) % 4;
+      const t = smooth(within);
+      return { block, next, t, pseudoHour, within };
+    }
+
+    function drawBackground(phaseA, phaseB, phaseBlend, nightness, withinRaw, story) {
+      const topBase = mixRGB(phaseA.bgTop, phaseB.bgTop, phaseBlend);
+      const bottomBase = mixRGB(phaseA.bgBottom, phaseB.bgBottom, phaseBlend);
+      const twilight = smooth(Math.min(withinRaw, 1 - withinRaw) * 2); // peak at mid-phase transition
+      const top = mixRGB(topBase, [40, 70, 120], twilight * 0.28);
+      const bottom = mixRGB(bottomBase, [12, 18, 32], twilight * 0.32);
+
+      // Darken as nightness increases
+      const dark = lerp(0.0, 0.65, nightness);
+      const topD = [Math.round(top[0]*(1-dark)), Math.round(top[1]*(1-dark)), Math.round(top[2]*(1-dark))];
+      const botD = [Math.round(bottom[0]*(1-dark)), Math.round(bottom[1]*(1-dark)), Math.round(bottom[2]*(1-dark))];
+
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, rgbStr(topD, 1));
+      g.addColorStop(1, rgbStr(botD, 1));
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+
+      if (story.mix > 0.001) {
+        const tint = hslToRgb(story.hue, lerp(0.25, 0.75, story.vivid), lerp(0.16, 0.34, story.mix));
+        const alpha = story.mix * (0.04 + 0.18 * audioPulse);
+        const tg = ctx.createLinearGradient(0, 0, 0, H);
+        tg.addColorStop(0, `rgba(${tint[0]},${tint[1]},${tint[2]},${alpha * 0.8})`);
+        tg.addColorStop(1, `rgba(${tint[0]},${tint[1]},${tint[2]},${alpha})`);
+        ctx.fillStyle = tg;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      if (audioRest > 0.001) {
+        const restAlpha = audioRest * 0.32;
+        const restTop = [10, 14, 26];
+        const restBottom = [6, 8, 14];
+        const rg = ctx.createLinearGradient(0, 0, 0, H);
+        rg.addColorStop(0, `rgba(${restTop[0]},${restTop[1]},${restTop[2]},${restAlpha})`);
+        rg.addColorStop(1, `rgba(${restBottom[0]},${restBottom[1]},${restBottom[2]},${restAlpha * 1.15})`);
+        ctx.fillStyle = rg;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      // Nebula blobs (more visible at night)
+      const nebAlpha = lerp(0.35, 0.85, nightness) * nebulaMult;
+      const blobs = [
+        { fx:0.22, fy:0.28, fr:0.52, col: (phaseBlend<0.5?phaseA.neb1:phaseB.neb1) },
+        { fx:0.76, fy:0.26, fr:0.62, col: (phaseBlend<0.5?phaseA.neb2:phaseB.neb2) },
+        { fx:0.70, fy:0.72, fr:0.58, col: (phaseBlend<0.5?phaseA.neb1:phaseB.neb2) },
+      ];
+      for (const b of blobs) {
+        const cx = b.fx * W, cy = b.fy * H;
+        const rr = b.fr * Math.min(W, H);
+        const gg = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+        // hack: replace alpha number in rgba string with scaled alpha
+        const col0 = b.col.replace(/0\.\d+\)/, `${(nebAlpha*0.18).toFixed(3)})`);
+        gg.addColorStop(0, col0);
+        gg.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gg;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rr, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // Vignette
+      const vg = ctx.createRadialGradient(W*0.5, H*0.5, Math.min(W,H)*0.10, W*0.5, H*0.5, Math.min(W,H)*0.65);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, `rgba(0,0,0,${lerp(0.28,0.52,nightness).toFixed(3)})`);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0,0,W,H);
+
+      // Soft galaxy swirl removed to avoid central diamond artifact
+    }
+
+    function persistenceWipe(phaseA, phaseB, phaseBlend, nightness) {
+      const top = mixRGB(phaseA.bgTop, phaseB.bgTop, phaseBlend);
+      const tint = [Math.round(top[0]*0.45), Math.round(top[1]*0.45), Math.round(top[2]*0.45)];
+      const a = lerp(0.20, 0.11, nightness); // more persistence at night
+      ctx.fillStyle = `rgba(${tint[0]},${tint[1]},${tint[2]},${a})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    function starParallax(s) {
+      const k = s.layer===0 ? 0.12 : (s.layer===1 ? 0.22 : 0.36);
+      let x = (s.x - camX*k) % W;
+      let y = (s.y - camY*k) % H;
+      if (x < 0) x += W;
+      if (y < 0) y += H;
+      return [x,y];
+    }
+
+    function drawStars(phaseA, phaseB, phaseBlend, nightness, story) {
+      const nightStarBoost = lerp(0.08, 1.0, smooth(nightness));
+      const starWarm = lerp(phaseA.starWarm, phaseB.starWarm, phaseBlend);
+
+      const cool = [210, 220, 255];
+      const warm = [255, 245, 235];
+      let base = mixRGB(cool, warm, starWarm);
+      const tempHue = mixHue(210, 26, (story.temp + 1) * 0.5);
+      const tempTint = hslToRgb(tempHue, 0.25, 0.78);
+      base = mixRGB(base, tempTint, 0.18 + 0.12 * story.mix);
+      if (story.mix > 0.001) {
+        const audioStar = hslToRgb((story.hue + story.spread) % 360, lerp(0.25, 0.55, story.vivid), 0.74);
+        base = mixRGB(base, audioStar, story.mix * 0.6);
+      }
+
+      for (const s of stars) {
+        const [x,y] = starParallax(s);
+        const tw = 0.5 + 0.5*Math.sin(s.tw);
+        let a = lerp(0.06, 0.9, tw) * nightStarBoost;
+        a *= lerp(0.12, 1.0, nightness); // daytime suppression
+        a *= starAlphaMult;
+
+        const layerMul = s.layer===0 ? 0.65 : (s.layer===1 ? 0.85 : 1.0);
+        a *= layerMul;
+
+        ctx.fillStyle = `rgba(${base[0]},${base[1]},${base[2]},${a})`;
+        ctx.beginPath();
+        ctx.arc(x,y,s.r,0,Math.PI*2);
+        ctx.fill();
+
+        // bloom
+        if (s.layer===2 && a>0.55 && Math.random()<0.018) {
+          ctx.fillStyle = `rgba(${base[0]},${base[1]},${base[2]},${a*0.22})`;
+          ctx.beginPath();
+          ctx.arc(x,y,s.r*3.2,0,Math.PI*2);
+          ctx.fill();
+        }
+      }
+    }
+
+    function drawSunMoon(nightness, pseudoHour) {
+      // Map pseudoHour (0..24) across the entire width
+      const sunFrac = pseudoHour / 24; // 0 = midnight (left), 12 = noon (center-ish), 24 = right edge wrap
+      const moonFrac = ((pseudoHour + 12) % 24) / 24; // opposite half of the sky
+
+      const sunX = lerp(-0.05 * W, 1.05 * W, sunFrac);
+      const moonX = lerp(-0.05 * W, 1.05 * W, moonFrac);
+
+      const sunY = H * 0.70 - Math.sin(Math.PI * sunFrac) * H * 0.28;
+      const moonY = H * 0.74 - Math.sin(Math.PI * moonFrac) * H * 0.22;
+
+      const sunA = lerp(1.0, 0.0, smooth(nightness));
+      const moonA = lerp(0.0, 1.0, smooth(nightness));
+
+      if (sunA > 0.01) {
+        const glowR = 120;
+        const g = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, glowR);
+        g.addColorStop(0, `rgba(255,235,180,${0.55*sunA})`);
+        g.addColorStop(0.35, `rgba(255,190,60,${0.20*sunA})`);
+        g.addColorStop(1, 'rgba(255,190,60,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, glowR, 0, Math.PI*2);
+        ctx.fill();
+
+        const core = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 30);
+        core.addColorStop(0, `rgba(255,245,200,${1.0*sunA})`);
+        core.addColorStop(1, `rgba(255,175,60,${1.0*sunA})`);
+        ctx.fillStyle = core;
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, 30, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      if (moonA > 0.01) {
+        const glowR = 48;
+        const g = ctx.createRadialGradient(moonX, moonY, 0, moonX, moonY, glowR);
+        g.addColorStop(0, `rgba(225,232,255,${0.28*moonA})`);
+        g.addColorStop(1, 'rgba(170,190,255,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, glowR, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle = `rgba(225,232,255,${0.92*moonA})`;
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, 15, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle = `rgba(190,200,235,${0.34*moonA})`;
+        for (let i=0;i<7;i++) {
+          const ang = i*1.55 + Math.sin(moonPhase*0.35)*0.06;
+          const ox = Math.cos(ang)*rand(2, 9);
+          const oy = Math.sin(ang)*rand(2, 9);
+          const rr = rand(1.2, 2.8);
+          ctx.beginPath();
+          ctx.arc(moonX+ox, moonY+oy, rr, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+    }
+
+    function drawShooters(nightness) {
+      for (const sh of shooters) {
+        const t = sh.life / sh.lifeMax;
+        const a = lerp(0, 0.92, t) * lerp(0.55, 1.0, nightness);
+
+        const vlen = Math.hypot(sh.vx, sh.vy);
+        if (vlen < 1) continue;
+        const dx = -sh.vx / vlen;
+        const dy = -sh.vy / vlen;
+
+        const x2 = sh.x + dx * sh.length;
+        const y2 = sh.y + dy * sh.length;
+
+        const g = ctx.createLinearGradient(sh.x, sh.y, x2, y2);
+        g.addColorStop(0, `rgba(255,255,255,${a})`);
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(sh.x, sh.y);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, a + 0.1)})`;
+        ctx.beginPath();
+        ctx.arc(sh.x, sh.y, 2.4, 0, Math.PI*2);
+        ctx.fill();
+
+        // dust
+        if (Math.random() < 0.55) {
+          for (let k=0;k<2;k++) {
+            const px = sh.x + dx*rand(12, sh.length*0.35) + rand(-6,6);
+            const py = sh.y + dy*rand(12, sh.length*0.35) + rand(-6,6);
+            const pr = rand(0.7, 1.7);
+            ctx.fillStyle = `rgba(240,245,255,${a*0.22})`;
+            ctx.beginPath();
+            ctx.arc(px, py, pr, 0, Math.PI*2);
+            ctx.fill();
+          }
+        }
+      }
+    }
+
+    function drawComets(nightness, story) {
+      for (const c of comets) {
+        const t = c.life / c.lifeMax;
+        const a = lerp(0.05, 0.78, t) * lerp(0.45, 1.0, nightness);
+        const vlen = Math.hypot(c.vx, c.vy) || 1;
+        const dx = -c.vx / vlen;
+        const dy = -c.vy / vlen;
+        const x2 = c.x + dx * c.length;
+        const y2 = c.y + dy * c.length;
+
+        const g = ctx.createLinearGradient(c.x, c.y, x2, y2);
+        g.addColorStop(0, `rgba(${c.color[0]},${c.color[1]},${c.color[2]},${a})`);
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.lineWidth = 2.8;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(c.x, c.y);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, a+0.08)})`;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 2.6, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    function drawAsteroids(nightness) {
+      ctx.fillStyle = `rgba(200,205,215,${lerp(0.20,0.55,nightness)})`;
+      for (const a of asteroids) {
+        ctx.beginPath();
+        ctx.ellipse(a.x, a.y, a.r*1.6, a.r, Math.sin(a.x*0.01)*0.4, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    function drawDust() {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      for (const d of dust) {
+        const alpha = Math.min(1, d.a * dustAlphaMult * 3.0);
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function parseGridLayout(layout, noteCount) {
+      let cols = 0;
+      let rows = 0;
+      if (layout && layout.includes('x')) {
+        const parts = layout.split('x');
+        cols = parseInt(parts[0], 10);
+        rows = parseInt(parts[1], 10);
+        if (Number.isFinite(cols) && Number.isFinite(rows) && cols > 0 && rows > 0) {
+          return { cols, rows };
+        }
+      }
+      if (noteCount <= 12) { cols = 4; rows = 3; }
+      else if (noteCount <= 24) { cols = 6; rows = 4; }
+      else if (noteCount <= 48) { cols = 8; rows = 6; }
+      else if (noteCount <= 88) { cols = 11; rows = 8; }
+      else if (noteCount <= 108) { cols = 12; rows = 9; }
+      else { cols = 12; rows = 10; }
+      if (cols * rows < noteCount) {
+        rows = Math.ceil(noteCount / cols);
+      }
+      return { cols, rows };
+    }
+
+    function drawNoteGrid(nightness, story) {
+      if (!noteGridEnabled || !noteLevels.length) return;
+      const noteCount = noteLevels.length;
+      const layout = parseGridLayout(noteGridLayout, noteCount);
+      const cols = layout.cols;
+      const rows = layout.rows;
+      if (!cols || !rows) return;
+
+      const pad = Math.max(12, Math.min(36, Math.round(Math.min(W, H) * 0.06)));
+      const gap = Math.max(2, Math.min(8, Math.round(Math.min(W, H) * 0.008)));
+      const gridW = W - pad * 2 - gap * (cols - 1);
+      const gridH = H - pad * 2 - gap * (rows - 1);
+      if (gridW <= 0 || gridH <= 0) return;
+
+      const cellW = gridW / cols;
+      const cellH = gridH / rows;
+      const energyBoost = 0.35 + audioEnergy * 0.8;
+      const lineAlpha = lerp(0.05, 0.18, nightness) * (0.5 + audioEnergy * 0.4);
+      const gridHue = (story.hue + story.spread * 0.25) % 360;
+      const gridSat = lerp(0.2, 0.6, story.vivid);
+      const gridLum = lerp(0.4, 0.75, nightness);
+      const gridRGB = hslToRgb(gridHue, gridSat, gridLum);
+      const gridMix = clamp(0.25 + story.mix * 0.65, 0, 1);
+      const strokeRGB = mixRGB([255, 255, 255], gridRGB, gridMix);
+      ctx.lineWidth = 1;
+
+      for (let i = 0; i < noteCount; i++) {
+        const col = i % cols;
+        const row = rows - 1 - Math.floor(i / cols);
+        if (row < 0) break;
+        const x = pad + col * (cellW + gap);
+        const y = pad + row * (cellH + gap);
+        const level = noteLevels[i] || 0;
+        const alpha = (0.05 + level * 0.6) * energyBoost * (1.0 - audioRest * 0.6);
+        if (alpha > 0.01) {
+          const hueOffset = (i / Math.max(1, noteCount) - 0.5) * story.spread * 2.0;
+          const hue = (story.hue + hueOffset + 360) % 360;
+          const sat = lerp(0.35, 0.9, story.vivid);
+          const lig = lerp(0.18, 0.65, level);
+          const rgb = hslToRgb(hue, sat, lig);
+          ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+          ctx.fillRect(x, y, cellW, cellH);
+        }
+        ctx.strokeStyle = `rgba(${strokeRGB[0]},${strokeRGB[1]},${strokeRGB[2]},${lineAlpha})`;
+        ctx.strokeRect(x, y, cellW, cellH);
+      }
+    }
+
+    function drawLinks(phaseA, phaseB, phaseBlend, nightness, story) {
+      const baseLink = mixRGB(phaseA.link, phaseB.link, phaseBlend);
+      const baseAlpha = lerp(0.10, 0.62, nightness) * linkAlphaMult;
+
+      const linkDist = LINK_DIST * linkDistMult;
+      const linkDist2 = linkDist*linkDist;
+      const bandCount = audioBands.length || 1;
+
+      for (let i=0;i<nodes.length;i++) {
+        const a = nodes[i];
+        for (let j=i+1;j<nodes.length;j++) {
+          const b = nodes[j];
+          const dx = b.x-a.x;
+          const dy = b.y-a.y;
+          const d2 = dx*dx+dy*dy;
+          if (d2 > linkDist2) continue;
+
+          const d = Math.sqrt(d2);
+          const tt = 1 - (d / linkDist);
+          const linkEq = ((a.eq || 0) + (b.eq || 0)) * 0.5;
+          const depth = ((a.z ?? 0.5) + (b.z ?? 0.5)) * 0.5;
+          let linkRGB = baseLink;
+          if (story.mix > 0.001) {
+            const bandOffset = bandCount
+              ? (((a.bandIndex || 0) + (b.bandIndex || 0)) * 0.5 / bandCount - 0.5)
+              : 0;
+            const linkHue = (story.hue + bandOffset * story.spread * 1.4 - story.spread * 0.2 + 360) % 360;
+            const audioLink = hslToRgb(linkHue, lerp(0.45, 0.8, story.vivid), lerp(0.48, 0.64, audioPulse * 0.6 + linkEq * 0.5));
+            linkRGB = mixRGB(baseLink, audioLink, story.mix * (0.55 + linkEq * 0.45));
+          }
+          const alpha = baseAlpha * lerp(0.12, 1.0, smooth(tt)) * (0.55 + linkEq * (0.9 + audioEnergy * 0.4)) * lerp(0.75, 1.2, depth);
+          const width = lerp(0.7, 2.0, smooth(tt)) * (0.7 + linkEq * 1.3) * (0.9 + audioPunch * 0.4);
+
+          ctx.lineWidth = width;
+          ctx.lineCap = 'round';
+          ctx.strokeStyle = `rgba(${linkRGB[0]},${linkRGB[1]},${linkRGB[2]},${alpha})`;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    function drawNodes(phaseA, phaseB, phaseBlend, nightness, story) {
+      const baseGlow = mixRGB(phaseA.nodeGlow, phaseB.nodeGlow, phaseBlend);
+      const bandCount = audioBands.length || 1;
+      const noteCount = noteLevels.length || 0;
+      const noteHues = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330];
+      const paletteMix = clamp(0.15 + story.mix * 0.85, 0, 1);
+      const paletteSpread = Math.max(8, story.spread);
+      const lowHue = (story.hue - paletteSpread * 0.55 + 360) % 360;
+      const midHue = (story.hue + paletteSpread * 0.1) % 360;
+      const highHue = (story.accentHue + paletteSpread * 0.45) % 360;
+      const satBase = lerp(0.35, 0.8, story.vivid);
+      const lumBase = lerp(0.42, 0.62, 0.35 + audioEnergy * 0.65);
+      const lowRGB = hslToRgb(lowHue, satBase, lerp(lumBase * 0.85, lumBase, audioLow));
+      const midRGB = hslToRgb(midHue, satBase, lerp(lumBase * 0.9, lumBase * 1.05, audioMid));
+      const highRGB = hslToRgb(highHue, satBase, lerp(lumBase, Math.min(0.72, lumBase * 1.12), audioHigh));
+
+      for (const n of nodes) {
+        const eq = n.eq || 0;
+        const depth = n.z ?? 0.5;
+        const bandIndex = n.bandIndex || 0;
+        const baseR = n.baseR || n.r;
+        const size = baseR * (0.75 + eq * (0.9 + audioEnergy * 0.4)) * lerp(0.75, 1.4, depth);
+        let glowRGB = baseGlow;
+        let noteLevel = 0;
+        let noteRGB = null;
+        if (noteCount) {
+          const pos = (n.noteOffset || 0) + (n.x / Math.max(1, W)) * 0.6 + notePhase;
+          const noteIndex = Math.floor((((pos % 1) + 1) % 1) * noteCount);
+          noteLevel = noteLevels[noteIndex] || 0;
+          const pitchClass = noteIndex % 12;
+          const noteHue = noteHues[pitchClass];
+          const noteSat = lerp(0.4, 0.9, story.vivid);
+          const noteLum = lerp(0.22, 0.68, noteLevel);
+          noteRGB = hslToRgb(noteHue, noteSat, noteLum);
+          glowRGB = mixRGB(glowRGB, noteRGB, noteLevel * (0.35 + audioEnergy * 0.55));
+        }
+        const bandPos = bandCount > 1 ? bandIndex / (bandCount - 1) : 0.5;
+        const lowW = clamp(1.0 - bandPos * 1.6, 0, 1) * audioLow;
+        const highW = clamp((bandPos - 0.3) * 1.6, 0, 1) * audioHigh;
+        const midW = clamp(1.0 - Math.abs(bandPos - 0.5) * 2.2, 0, 1) * audioMid;
+        const weightSum = lowW + midW + highW;
+        let rangeRGB = baseGlow;
+        if (weightSum > 1e-4) {
+          rangeRGB = [
+            Math.round((lowRGB[0] * lowW + midRGB[0] * midW + highRGB[0] * highW) / weightSum),
+            Math.round((lowRGB[1] * lowW + midRGB[1] * midW + highRGB[1] * highW) / weightSum),
+            Math.round((lowRGB[2] * lowW + midRGB[2] * midW + highRGB[2] * highW) / weightSum),
+          ];
+        }
+        if (paletteMix < 0.999) {
+          rangeRGB = mixRGB(baseGlow, rangeRGB, paletteMix);
+        }
+        const rangeMix = clamp(0.18 + audioEnergy * 0.35 + eq * 0.35, 0, 0.85);
+        if (story.mix > 0.001) {
+          const bandOffset = bandCount ? (bandIndex / bandCount - 0.5) : 0;
+          const glowHue = (story.hue + bandOffset * story.spread * 1.6 + story.spread * 0.2) % 360;
+          const glowLum = lerp(0.5, 0.68, audioPulse * 0.6 + eq * 0.5);
+          const audioGlow = hslToRgb(glowHue, lerp(0.45, 0.84, story.vivid), glowLum);
+          glowRGB = mixRGB(glowRGB, audioGlow, story.mix * (0.5 + eq * 0.5));
+        }
+        glowRGB = mixRGB(glowRGB, rangeRGB, rangeMix);
+
+        if (n.px != null && n.py != null) {
+          ctx.lineWidth = 1;
+          const trailAlpha = lerp(0.05, 0.18, nightness) * (0.6 + eq * 0.8) * lerp(0.75, 1.25, depth);
+          ctx.strokeStyle = `rgba(${glowRGB[0]},${glowRGB[1]},${glowRGB[2]},${trailAlpha})`;
+          ctx.beginPath();
+          ctx.moveTo(n.px, n.py);
+          ctx.lineTo(n.x, n.y);
+          ctx.stroke();
+        }
+
+        const glowRadius = size * (4.5 + eq * 2.0);
+        const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, glowRadius);
+        const glowAlpha = lerp(0.1, 0.24, nightness) * (0.6 + eq * 0.9) * lerp(0.75, 1.3, depth);
+        g.addColorStop(0, `rgba(${glowRGB[0]},${glowRGB[1]},${glowRGB[2]},${glowAlpha})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, glowRadius, 0, Math.PI*2);
+        ctx.fill();
+
+        const coreAlpha = lerp(0.6, 0.92, nightness) * (0.7 + eq * 0.55);
+        let coreRGB = [235, 245, 255];
+        if (noteRGB) {
+          coreRGB = mixRGB(coreRGB, noteRGB, noteLevel * (0.35 + audioEnergy * 0.35));
+        }
+        coreRGB = mixRGB(coreRGB, rangeRGB, rangeMix * 0.45);
+        ctx.fillStyle = `rgba(${coreRGB[0]},${coreRGB[1]},${coreRGB[2]},${coreAlpha})`;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, size, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    function updateLabels(phaseIndex, nightness) {
+      if (phaseEl) phaseEl.textContent = PHASE_LABELS[phaseIndex];
+      if (todEl) todEl.textContent = nightness > 0.5 ? 'Night' : 'Day';
+    }
+
+    function presentFrame(story, nightness) {
+      screenCtx.globalCompositeOperation = 'source-over';
+      screenCtx.globalAlpha = 1;
+      screenCtx.drawImage(sceneCanvas, 0, 0, W, H);
+
+      const bloomStrength = clamp(0.08 + story.vivid * 0.22 + audioEnergy * 0.18 + audioPulse * 0.12, 0, 0.45);
+      if (bloomStrength > 0.01) {
+        const blurPx = Math.max(6, Math.min(26, Math.round(Math.min(W, H) * 0.012)));
+        bloomCtx.globalCompositeOperation = 'source-over';
+        bloomCtx.globalAlpha = bloomStrength;
+        bloomCtx.filter = `blur(${blurPx}px)`;
+        bloomCtx.clearRect(0, 0, W, H);
+        bloomCtx.drawImage(sceneCanvas, 0, 0, W, H);
+        bloomCtx.filter = 'none';
+        bloomCtx.globalAlpha = 1;
+
+        screenCtx.globalCompositeOperation = 'screen';
+        screenCtx.drawImage(bloomCanvas, 0, 0, W, H);
+      }
+
+      const gradeAlpha = clamp(0.06 + story.mix * 0.18 + (1 - nightness) * 0.06, 0.04, 0.28);
+      if (gradeAlpha > 0.001) {
+        const gradeHue = (story.hue + (nightness > 0.5 ? -12 : 8) + 360) % 360;
+        const gradeSat = lerp(0.12, 0.45, story.vivid);
+        const gradeLum = lerp(0.4, 0.6, 1 - nightness * 0.6);
+        const gradeRGB = hslToRgb(gradeHue, gradeSat, gradeLum);
+        screenCtx.globalCompositeOperation = 'soft-light';
+        screenCtx.fillStyle = `rgba(${gradeRGB[0]},${gradeRGB[1]},${gradeRGB[2]},${gradeAlpha})`;
+        screenCtx.fillRect(0, 0, W, H);
+      }
+
+      screenCtx.globalCompositeOperation = 'source-over';
+      screenCtx.globalAlpha = 1;
+    }
+
+    let last = performance.now();
+
+    function step(now) {
+      // Some embedded webview transitions do not reliably emit an initial resize event.
+      // Keep viewport/canvas dimensions in sync per-frame so entity spread/rescale self-heals.
+      resize();
+      if (sceneReady && !sceneBoundsReady) {
+        if (W < 120 || H < 120) {
+          requestAnimationFrame(step);
+          return;
+        }
+        spreadEntitiesToBounds();
+        sceneBoundsReady = true;
+      }
+
+      const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
+      last = now;
+
+      let hourOverride = autoHourOverride;
+      if (auto) {
+        dayNight = dayNightFromClock();
+        hourOverride = autoHourOverride;
+        if (knob) knob.value = dayNight.toFixed(3);
+      } else {
+        // keep manual override so slider tracks the same mapping as auto
+        hourOverride = autoHourOverride ?? pseudoHourForKnob(dayNight);
+      }
+
+      const manualNight = nightnessForPseudoHour(hourOverride);
+      const nightBase = (auto && autoNightness !== null)
+        ? autoNightness
+        : (manualNight !== null && manualNight !== undefined ? manualNight : dayNight);
+      const nightness = smooth(clamp(nightBase, 0, 1));
+
+      const { block, next, t: phaseBlend, pseudoHour, within } = currentPhaseAndBlend(dayNight, hourOverride);
+      const phaseA = PHASES[block];
+      const phaseB = PHASES[next];
+      updateLabels(block, nightness);
+
+      if (!backgroundEnabled) {
+        screenCtx.globalCompositeOperation = 'source-over';
+        screenCtx.globalAlpha = 1;
+        screenCtx.fillStyle = '#000';
+        screenCtx.fillRect(0, 0, W, H);
+        requestAnimationFrame(step);
+        return;
+      }
+
+      const bandCount = audioBands.length || 1;
+      audioBandPhase = (audioBandPhase + dt * (0.25 + audioFlow * 1.6 + audioEnergy * 0.4)) % bandCount;
+      notePhase = (notePhase + dt * (0.08 + audioFlow * 0.6 + audioEnergy * 0.25)) % 1.0;
+
+      // Camera drift
+      camX += camVX * dt * camSpeedMult; camY += camVY * dt * camSpeedMult;
+      camVX += rand(-7,7) * dt * camSpeedMult; camVY += rand(-7,7) * dt * camSpeedMult;
+      camVX = clamp(camVX, -34*camSpeedMult, 34*camSpeedMult); camVY = clamp(camVY, -34*camSpeedMult, 34*camSpeedMult);
+      // keep cam drift unwrapped to avoid periodic parallax snapping
+      galaxyPhase += dt * 0.12 * camSpeedMult;
+
+      // Twinkle
+      for (const s of stars) {
+        s.tw += s.twSpeed * dt;
+        if (s.tw > 1e6) s.tw = s.tw % (Math.PI*2);
+      }
+
+      // Nodes
+      for (const n of nodes) {
+        n.px = n.x; n.py = n.y;
+
+        if (n.bandOffset == null) n.bandOffset = Math.random();
+        if (n.noteOffset == null) n.noteOffset = Math.random();
+        if (n.z == null) n.z = Math.random();
+        if (n.baseR == null) n.baseR = n.r || rand(2.4, 5.2);
+
+        let bandIndex = 0;
+        let targetEq = 0;
+        if (audioBands.length) {
+          const raw = (n.x / Math.max(1, W)) * bandCount + n.bandOffset * bandCount + audioBandPhase;
+          bandIndex = Math.floor(((raw % bandCount) + bandCount) % bandCount);
+          targetEq = audioBands[bandIndex] || 0;
+        }
+        const eqAlpha = targetEq > (n.eq || 0) ? 0.35 : 0.18;
+        n.eq = (n.eq || 0) + (targetEq - (n.eq || 0)) * eqAlpha;
+        n.bandIndex = bandIndex;
+
+        // gentle drift (slower)
+        const eqSpeed = 0.8 + n.eq * 0.6 + audioComplexity * 0.2;
+        n.vx += rand(-6,6) * dt * nodeSpeedMult * eqSpeed;
+        n.vy += rand(-6,6) * dt * nodeSpeedMult * eqSpeed;
+
+        n.vx *= (1 - 0.12 * dt * nodeSpeedMult);
+        n.vy *= (1 - 0.12 * dt * nodeSpeedMult);
+
+        n.x += n.vx * dt;
+        n.y += n.vy * dt;
+
+        if (n.x < 0) { n.x = 0; n.vx = Math.abs(n.vx) * rand(0.92, 1.05); }
+        else if (n.x > W) { n.x = W; n.vx = -Math.abs(n.vx) * rand(0.92, 1.05); }
+
+        if (n.y < 0) { n.y = 0; n.vy = Math.abs(n.vy) * rand(0.92, 1.05); }
+        else if (n.y > H) { n.y = H; n.vy = -Math.abs(n.vy) * rand(0.92, 1.05); }
+      }
+
+      const story = buildAudioStory();
+
+      // Shooters
+      if (Math.random() < SHOOTER_SPAWN_CHANCE * lerp(0.55, 1.2, nightness) * shooterRate) spawnShooter();
+      for (let i=shooters.length-1;i>=0;i--) {
+        const sh = shooters[i];
+        sh.x += sh.vx * dt; sh.y += sh.vy * dt;
+        sh.life -= dt;
+        if (sh.life <= 0 || sh.x < -520 || sh.x > W + 520 || sh.y < -520 || sh.y > H + 520) shooters.splice(i,1);
+      }
+
+      // Comets
+      if (Math.random() < COMET_SPAWN_CHANCE * (0.6 + cometRate * 1.4) * lerp(0.6, 1.4, nightness)) {
+        const side = Math.random() < 0.5 ? 'right' : 'bottom';
+        const sx = side === 'right' ? W + 60 : rand(-80, W * 0.2);
+        const sy = side === 'right' ? rand(-40, H * 0.6) : H + 60;
+        const ang = side === 'right' ? rand(Math.PI*0.65, Math.PI*0.92) : rand(Math.PI*1.1, Math.PI*1.35);
+        const spd = rand(420, 680);
+        const lifeMax = rand(1.6, 2.8) * lerp(0.8, 1.4, cometRate);
+        let cometColor = [rand(180,230)|0, rand(210,255)|0, 255];
+        if (story.mix > 0.05) {
+          const useAccent = audioPunch > 0.6 && Math.random() < 0.35;
+          const baseHue = useAccent ? story.accentHue : story.hue;
+          const hue = (baseHue + rand(-story.spread, story.spread)) % 360;
+          cometColor = hslToRgb(hue, lerp(0.45, 0.85, story.vivid), lerp(0.5, 0.68, audioPulse));
+        }
+        comets.push({
+          x: sx, y: sy,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd,
+          life: lifeMax,
+          lifeMax,
+          length: rand(280, 520) * lerp(0.7, 1.8, cometRate),
+          color: cometColor,
+        });
+      }
+      for (let i=comets.length-1;i>=0;i--) {
+        const c = comets[i];
+        c.x += c.vx * dt; c.y += c.vy * dt;
+        c.life -= dt;
+        if (c.life <= 0 || c.x < -640 || c.x > W+640 || c.y < -640 || c.y > H+640) comets.splice(i,1);
+      }
+
+      // Asteroids drift
+      for (const a of asteroids) {
+        a.x += a.vx * dt;
+        a.y += a.vy * dt;
+        if (a.x < -20) a.x += W+40;
+        if (a.x > W+20) a.x -= W+40;
+        if (a.y < -20) a.y += H+40;
+        if (a.y > H+20) a.y -= H+40;
+      }
+
+      // Sun/moon motion
+      sunPhase += dt * lerp(0.10, 0.06, nightness);
+      moonPhase += dt * lerp(0.08, 0.12, nightness);
+
+      // Draw
+      drawBackground(phaseA, phaseB, phaseBlend, nightness, within, story);
+      persistenceWipe(phaseA, phaseB, phaseBlend, nightness);
+
+      drawStars(phaseA, phaseB, phaseBlend, nightness, story);
+      drawDust();
+      drawNoteGrid(nightness, story);
+      drawShooters(nightness);
+      drawComets(nightness, story);
+      drawAsteroids(nightness);
+      drawSunMoon(nightness, pseudoHour);   // paint the light source first
+      drawLinks(phaseA, phaseB, phaseBlend, nightness, story);
+      drawNodes(phaseA, phaseB, phaseBlend, nightness, story);
+
+      presentFrame(story, nightness);
+
+      requestAnimationFrame(step);
+    }
+
+    initUi();
+    requestAnimationFrame(step);
+  </script>
+</body>
+</html>

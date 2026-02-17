@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+
+# Virtualenvs
+.venv/
+venv/
+
+# Local secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+
+# Optional local-only config overlays
+config/local/
+config/**/*.local.json
+
+# OS noise
+.DS_Store
+Thumbs.db

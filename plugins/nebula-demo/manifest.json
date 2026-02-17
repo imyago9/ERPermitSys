@@ -1,0 +1,9 @@
+{
+  "id": "nebula-demo",
+  "kind": "html-background",
+  "name": "Nebula Demo",
+  "version": "0.1.0",
+  "description": "Minimal HTML-only plugin for manager scaffolding.",
+  "entry": "index.html",
+  "enabled": true
+}

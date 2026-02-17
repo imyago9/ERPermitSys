@@ -1,0 +1,10 @@
+{
+  "id": "kaleidoscopic-dream",
+  "kind": "html-background",
+  "name": "Kaleidoscopic Dream",
+  "version": "0.1.0",
+  "description": "Hypertrip kaleidoscopic background with vivid chromatic trails.",
+  "entry": "index.html",
+  "tags": ["background", "kaleidoscope", "vivid"],
+  "enabled": true
+}

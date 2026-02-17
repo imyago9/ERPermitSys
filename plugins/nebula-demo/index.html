@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nebula Demo</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: #ebf3f1;
+      background: radial-gradient(circle at 15% 15%, #355e75 0%, #122231 40%, #06090f 100%);
+    }
+    .badge {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: rgba(8, 13, 18, 0.68);
+      border: 1px solid rgba(152, 184, 198, 0.38);
+      letter-spacing: 0.04em;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .glow {
+      position: absolute;
+      width: 50vmax;
+      height: 50vmax;
+      border-radius: 999px;
+      filter: blur(70px);
+      opacity: 0.5;
+      animation: drift 16s ease-in-out infinite alternate;
+    }
+    .glow.a {
+      background: #43b6cf;
+      left: -8vmax;
+      top: -14vmax;
+    }
+    .glow.b {
+      background: #6ec49a;
+      right: -12vmax;
+      bottom: -16vmax;
+      animation-delay: -6s;
+    }
+    @keyframes drift {
+      from { transform: translate3d(0, 0, 0) scale(1); }
+      to { transform: translate3d(4vmax, 3vmax, 0) scale(1.12); }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow a"></div>
+  <div class="glow b"></div>
+  <div class="badge">Plugin Scaffold Ready</div>
+</body>
+</html>

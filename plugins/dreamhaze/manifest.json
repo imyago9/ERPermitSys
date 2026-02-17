@@ -1,0 +1,10 @@
+{
+  "id": "dreamhaze",
+  "kind": "html-background",
+  "name": "Dreamhaze",
+  "version": "0.1.0",
+  "description": "Dense chromatic haze background with infinite-string movement.",
+  "entry": "index.html",
+  "tags": ["background", "dream", "ambient"],
+  "enabled": true
+}

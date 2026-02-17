@@ -1,0 +1,12 @@
+{
+  "zip": "00000",
+  "lat": 0.0,
+  "lon": 0.0,
+  "timeZone": "UTC",
+  "audioDeviceId": "",
+  "audioDeviceName": "",
+  "audioEnabled": false,
+  "backgroundEnabled": true,
+  "dayNightAuto": true,
+  "animMode": "focus"
+}

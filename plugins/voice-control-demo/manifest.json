@@ -1,0 +1,10 @@
+{
+  "id": "voice-control-demo",
+  "kind": "feature",
+  "name": "Voice Control Demo",
+  "version": "0.1.0",
+  "description": "Scaffold backend plugin that can later host microphone + intent handling.",
+  "backend": "backend.py",
+  "tags": ["voice", "ai", "control", "demo"],
+  "enabled": true
+}
