@@ -88,9 +88,9 @@ from erpermitsys.ui.window.frameless_window import FramelessWindow
 
 _PERMIT_CATEGORIES: tuple[str, ...] = ("building", "remodeling", "demolition")
 _PERMIT_CATEGORY_LABELS: dict[str, str] = {
-    "building": "Building0.0.6",
-    "remodeling": "Remodeling0.0.6",
-    "demolition": "Demolition0.0.6",
+    "building": "Building",
+    "remodeling": "Remodeling",
+    "demolition": "Demolition",
 }
 _DEFAULT_DOCUMENT_FOLDER_NAME = "General"
 _UPDATE_STARTUP_DELAY_MS = 1800
