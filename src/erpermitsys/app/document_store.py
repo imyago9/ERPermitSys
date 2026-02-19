@@ -71,11 +71,11 @@ class LocalPermitDocumentStore:
         return self.data_root / _PERMITS_ROOT
 
     def permit_path(self, permit: PermitRecord) -> Path:
-        category = _safe_segment(permit.category or "building") or "building"
+        permit_type = _safe_segment(permit.permit_type or "building") or "building"
         permit_id = _safe_segment(permit.permit_id)
         if not permit_id:
             raise ValueError("Permit must have a permit_id before storing documents.")
-        return self.permits_root / category / permit_id
+        return self.permits_root / permit_type / permit_id
 
     def folder_path(self, permit: PermitRecord, folder: PermitDocumentFolder) -> Path:
         lineage = self._folder_lineage(permit, folder)

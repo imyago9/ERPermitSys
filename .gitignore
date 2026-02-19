@@ -23,6 +23,7 @@ config/plugins/space/settings.json
 # Local runtime data and app state
 data/
 data*/
+timeline-debug.jsonl
 *.sqlite
 *.sqlite3
 *.db

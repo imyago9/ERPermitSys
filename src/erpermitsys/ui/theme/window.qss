@@ -44,6 +44,10 @@ QWidget#AppScene {
     background: transparent;
 }
 
+QWidget#BackgroundWebView {
+    background: transparent;
+}
+
 QWidget#PermitPanelStrip {
     background: transparent;
 }
@@ -52,7 +56,29 @@ QWidget#PermitPanelHost {
     background: transparent;
 }
 
+QFrame#TrackerPanelsShell {
+    border: none;
+    border-radius: 18px;
+}
+
+QWidget#TrackerPanelsLeftColumn {
+    background: transparent;
+}
+
 QWidget#TrackerRightColumn {
+    background: transparent;
+}
+
+QTabWidget#ContactsJurisdictionsTabs {
+    background: transparent;
+}
+
+QTabWidget#ContactsJurisdictionsTabs::tab-bar {
+    alignment: center;
+}
+
+QTabWidget#ContactsJurisdictionsTabs::pane {
+    border: none;
     background: transparent;
 }
 
@@ -78,7 +104,13 @@ QFrame#TrackerPanel {
 }
 
 QFrame#TrackerPanel[active="true"] {
-    border-width: 2px;
+    border-width: 0px;
+}
+
+QFrame#PermitWorkspaceBlurOverlay {
+    border: none;
+    border-radius: 14px;
+    background: transparent;
 }
 
 QLabel#TrackerPanelTitle {
@@ -87,11 +119,45 @@ QLabel#TrackerPanelTitle {
     letter-spacing: 0.4px;
 }
 
+QToolButton#TrackerPanelCollapseButton {
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 24px;
+    max-height: 24px;
+    font-size: 13px;
+    font-weight: 760;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    padding: 0px;
+}
+
+QToolButton#TrackerPanelCollapseButton:hover {
+    background: rgba(122, 142, 164, 76);
+}
+
+QToolButton#TrackerPanelCollapseButton:pressed {
+    background: rgba(108, 130, 154, 110);
+}
+
+QFrame#TrackerPanel[panelRole="permit"][contextual="true"] QLabel#TrackerPanelTitle {
+    font-size: 17px;
+    letter-spacing: 0.32px;
+}
+
 QPushButton#TrackerPanelActionButton {
     font-size: 12px;
     font-weight: 650;
     border-radius: 8px;
     padding: 8px 12px;
+}
+
+QPushButton#TrackerPanelActionButton[addPermitPrimary="true"] {
+    font-size: 13px;
+    font-weight: 760;
+    letter-spacing: 0.24px;
+    border-radius: 11px;
+    min-height: 34px;
+    padding: 8px 16px;
 }
 
 QLineEdit#TrackerPanelSearch,
@@ -144,10 +210,141 @@ QLabel#TrackerPanelMeta {
     letter-spacing: 0.25px;
 }
 
+QLabel#TrackerPanelMeta[permitHeader="true"] {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.24px;
+}
+
+QLabel#TrackerPanelHint {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18px;
+}
+
+QLabel#TrackerPanelSubsectionTitle {
+    font-size: 10px;
+    font-weight: 720;
+    letter-spacing: 0.35px;
+    padding: 0px 2px;
+}
+
+QLabel#TrackerPanelEmptyState {
+    font-size: 13px;
+    font-weight: 620;
+    letter-spacing: 0.2px;
+    padding: 16px 14px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+}
+
+QLabel#AdminModeTitle {
+    font-size: 13px;
+    font-weight: 760;
+    letter-spacing: 0.35px;
+}
+
+QLabel#AdminDirtyBubble {
+    font-size: 10px;
+    font-weight: 760;
+    letter-spacing: 0.28px;
+    padding: 4px 11px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+}
+
+QFrame#AdminListPane {
+    border-radius: 14px;
+    border: 1px solid transparent;
+}
+
+QPushButton#TrackerPanelActionButton[adminPrimaryCta="true"] {
+    font-size: 13px;
+    font-weight: 740;
+    border-radius: 10px;
+    padding: 9px 14px;
+}
+
+QPushButton#TrackerPanelActionButton[adminBackButton="true"] {
+    font-size: 12px;
+    font-weight: 760;
+    border-radius: 10px;
+    padding: 8px 14px;
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="update"],
+QPushButton#TrackerPanelActionButton[bundleAction="cancel"] {
+    font-size: 12px;
+    border-radius: 9px;
+    padding: 7px 12px;
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="update"] {
+    font-weight: 740;
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="cancel"] {
+    font-weight: 650;
+}
+
+QLabel#AdminSectionTitle {
+    font-size: 12px;
+    font-weight: 720;
+    letter-spacing: 0.25px;
+}
+
+QLabel#AdminListTitleChip {
+    border-radius: 9px;
+    border: none;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 740;
+    letter-spacing: 0.24px;
+}
+
+QLabel#AdminSectionHint {
+    font-size: 10px;
+    font-weight: 560;
+    letter-spacing: 0.15px;
+}
+
+QLabel#AdminListEmptyState {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.15px;
+    padding: 12px 14px;
+}
+
+QFrame#AdminInputShell {
+    border-radius: 10px;
+    border: none;
+}
+
+QFrame#AdminAttachedContactsPane {
+    border-radius: 12px;
+    border: 1px solid transparent;
+}
+
+QLabel#AdminInputShellLabel {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+QFrame#AdminHeaderBar {
+    border-radius: 11px;
+    border: none;
+}
+
 QListWidget#TrackerPanelList {
     border-radius: 10px;
     padding: 8px;
     outline: none;
+}
+
+QFrame#PermitFormCard[adminForm="true"] {
+    border-radius: 16px;
+    border-width: 2px;
 }
 
 QListWidget#TrackerPanelList::item {
@@ -173,11 +370,16 @@ QWidget#PermitCategoryPicker {
     padding: 0px;
 }
 
+QWidget#PermitControlsHost {
+    border: none;
+    background: transparent;
+}
+
 QPushButton#PermitCategoryPill {
     border-radius: 16px;
     min-height: 34px;
     padding: 7px 16px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     letter-spacing: 0.3px;
 }
@@ -250,6 +452,170 @@ QLabel#TrackerListFieldValue[field="added"] {
     font-weight: 540;
 }
 
+QWidget#AttachedContactsHost {
+    background: transparent;
+}
+
+QScrollArea#InlineAttachedContactsScroll {
+    border: none;
+    background: transparent;
+}
+
+QScrollArea#InlineAttachedContactsScroll > QWidget > QWidget {
+    background: transparent;
+}
+
+QFrame#AttachedContactChip {
+    border-radius: 11px;
+    border: 1px solid transparent;
+}
+
+QFrame#AttachedContactChipMetaGroup {
+    border-radius: 8px;
+    border: 1px solid transparent;
+}
+
+QFrame#AttachedContactChipMetaGroup QLabel {
+    background: transparent;
+    border: none;
+}
+
+QFrame#AttachedContactChipValueGroup {
+    border-radius: 8px;
+    border: 1px solid transparent;
+}
+
+QFrame#AttachedContactChipValueGroup QLabel {
+    background: transparent;
+    border: none;
+}
+
+QFrame#AttachedContactChipMetaRow {
+    border-radius: 7px;
+    border: 1px solid transparent;
+}
+
+QFrame#AttachedContactChipMetaRow QLabel {
+    background: transparent;
+    border: none;
+}
+
+QLabel#AttachedContactChipLabel {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.28px;
+}
+
+QLabel#AttachedContactChipTitle {
+    font-size: 12px;
+    font-weight: 730;
+    letter-spacing: 0.22px;
+}
+
+QLabel#AttachedContactChipDetail {
+    font-size: 10px;
+    font-weight: 580;
+    letter-spacing: 0.16px;
+}
+
+QPushButton#AttachedContactChipRemoveButton {
+    min-width: 18px;
+    max-width: 18px;
+    min-height: 18px;
+    max-height: 18px;
+    border-radius: 9px;
+    padding: 0px;
+    font-size: 10px;
+    font-weight: 800;
+    border: 1px solid transparent;
+}
+
+QPushButton#AttachedContactChipEditButton {
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 18px;
+    max-height: 18px;
+    border-radius: 9px;
+    padding: 0px;
+    font-size: 9px;
+    font-weight: 700;
+    border: 1px solid transparent;
+}
+
+QWidget#ContactsJurisdictionsView QLabel#TrackerPanelTitle {
+    font-size: 26px;
+}
+
+QWidget#ContactsJurisdictionsView QLabel#TrackerPanelMeta {
+    font-size: 14px;
+}
+
+QWidget#ContactsJurisdictionsView QLabel#AdminModeTitle,
+QWidget#ContactsJurisdictionsView QLabel#AdminSectionTitle,
+QWidget#ContactsJurisdictionsView QLabel#AdminListTitleChip,
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue,
+QWidget#ContactsJurisdictionsView QLabel#AttachedContactChipTitle {
+    font-size: 15px;
+}
+
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="client"],
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="contractor"],
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="county"],
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="address"] {
+    font-size: 19px;
+}
+
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="parcel"],
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="email"],
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="number"],
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="url"],
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldValue[field="request"] {
+    font-size: 14px;
+}
+
+QWidget#ContactsJurisdictionsView QLabel#AdminSectionHint,
+QWidget#ContactsJurisdictionsView QLabel#AdminInputShellLabel,
+QWidget#ContactsJurisdictionsView QLabel#AdminDirtyBubble,
+QWidget#ContactsJurisdictionsView QLabel#TrackerListFieldLabel,
+QWidget#ContactsJurisdictionsView QLabel#AttachedContactChipLabel,
+QWidget#ContactsJurisdictionsView QLabel#AttachedContactChipDetail,
+QWidget#ContactsJurisdictionsView QPushButton#AttachedContactChipRemoveButton {
+    font-size: 13px;
+}
+
+QWidget#ContactsJurisdictionsView QLabel#AdminListEmptyState,
+QWidget#ContactsJurisdictionsView QPushButton#TrackerPanelActionButton[adminPrimaryCta="true"] {
+    font-size: 18px;
+}
+
+QWidget#ContactsJurisdictionsView QPushButton#TrackerPanelActionButton,
+QWidget#ContactsJurisdictionsView QPushButton#PermitFormDangerButton,
+QWidget#ContactsJurisdictionsView QPushButton#TrackerPanelActionButton[adminBackButton="true"],
+QWidget#ContactsJurisdictionsView QPushButton#TrackerPanelActionButton[bundleAction="update"],
+QWidget#ContactsJurisdictionsView QPushButton#TrackerPanelActionButton[bundleAction="cancel"] {
+    font-size: 15px;
+}
+
+QWidget#ContactsJurisdictionsView QPushButton#AttachedContactChipEditButton {
+    font-size: 12px;
+}
+
+QWidget#ContactsJurisdictionsView QTabWidget#ContactsJurisdictionsTabs QTabBar::tab {
+    font-size: 15px;
+}
+
+QWidget#ContactsJurisdictionsView QLineEdit#TrackerPanelSearch,
+QWidget#ContactsJurisdictionsView QLineEdit#PermitFormInput,
+QWidget#ContactsJurisdictionsView QComboBox#TrackerPanelFilter,
+QWidget#ContactsJurisdictionsView QComboBox#PermitFormCombo {
+    font-size: 15px;
+}
+
+QWidget#ContactsJurisdictionsView QComboBox#TrackerPanelFilter QAbstractItemView,
+QWidget#ContactsJurisdictionsView QComboBox#PermitFormCombo QAbstractItemView {
+    font-size: 15px;
+}
+
 QWidget#PermitFormView {
     background: transparent;
 }
@@ -258,8 +624,54 @@ QFrame#PermitFormCard {
     border-radius: 14px;
 }
 
+QFrame#PermitWorkspaceFocusRegion {
+    border-radius: 12px;
+    border: none;
+}
+
+QWidget#PermitWorkspaceContentHost {
+    background: transparent;
+}
+
+QLabel#PermitWorkspaceNextStepNote {
+    font-size: 12px;
+    font-weight: 680;
+    letter-spacing: 0.2px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    padding: 8px 12px;
+}
+
+QWidget#PermitWorkspaceSummaryGrid {
+    border: none;
+    background: transparent;
+}
+
+QFrame#PermitWorkspaceInfoCell {
+    border-radius: 12px;
+    border: 1px solid transparent;
+    min-height: 66px;
+}
+
+QLabel#PermitWorkspaceInfoLabel {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.22px;
+}
+
+QLabel#PermitWorkspaceInfoValue {
+    font-size: 13px;
+    font-weight: 710;
+    letter-spacing: 0.18px;
+}
+
 QFrame#PermitDocumentsSection {
     border-radius: 10px;
+}
+
+QFrame#PermitDocumentsSection[nextActionPanel="true"] {
+    border-width: 2px;
+    border-style: solid;
 }
 
 QLabel#PermitDocumentsTitle {
@@ -268,10 +680,170 @@ QLabel#PermitDocumentsTitle {
     letter-spacing: 0.4px;
 }
 
+QLabel#PermitDocumentsTitle[timeline="true"] {
+    font-size: 16px;
+}
+
+QLabel#PermitDocumentsTitle[nextAction="true"] {
+    font-size: 17px;
+}
+
 QLabel#PermitDocumentStatus {
     font-size: 10px;
     font-weight: 620;
     letter-spacing: 0.25px;
+}
+
+QLabel#PermitDocumentStatus[nextAction="true"] {
+    font-size: 13px;
+}
+
+QFrame#DocumentChecklistSlotCard {
+    border-radius: 10px;
+    border: 1px solid transparent;
+}
+
+QFrame#DocumentChecklistSlotCard[selected="true"] {
+    border-width: 1px;
+}
+
+QLabel#DocumentChecklistSlotIcon {
+    border: none;
+    background: transparent;
+    padding: 0;
+}
+
+QLabel#DocumentChecklistSlotTitle {
+    font-size: 13px;
+    font-weight: 740;
+    letter-spacing: 0.2px;
+}
+
+QLabel#DocumentChecklistSlotMeta {
+    font-size: 10px;
+    font-weight: 620;
+    letter-spacing: 0.16px;
+}
+
+QLabel#DocumentChecklistSlotBadge {
+    border-radius: 8px;
+    border: 1px solid transparent;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16px;
+}
+
+QLabel#DocumentChecklistSlotCount {
+    font-size: 10px;
+    font-weight: 640;
+    letter-spacing: 0.15px;
+}
+
+QFrame#PermitDocumentFileCard {
+    border-radius: 10px;
+    border: 1px solid transparent;
+}
+
+QFrame#PermitDocumentFileCard[selected="true"] {
+    border-width: 1px;
+}
+
+QLabel#PermitDocumentFileIcon {
+    border: none;
+    background: transparent;
+    padding: 0;
+}
+
+QLabel#PermitDocumentFileTitle {
+    font-size: 13px;
+    font-weight: 720;
+    letter-spacing: 0.18px;
+}
+
+QLabel#PermitDocumentFileMeta {
+    font-size: 10px;
+    font-weight: 620;
+    letter-spacing: 0.14px;
+}
+
+QLabel#PermitDocumentFileExt {
+    border-radius: 8px;
+    border: 1px solid transparent;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.15px;
+}
+
+QScrollArea#PermitTimelineScroll {
+    border: none;
+    background: transparent;
+}
+
+QWidget#PermitTimelineTrack {
+    background: transparent;
+}
+
+QFrame#PermitTimelineBubble {
+    border-radius: 11px;
+    border: 1px solid transparent;
+}
+
+QPushButton#PermitTimelineDeleteButton {
+    min-width: 18px;
+    max-width: 18px;
+    min-height: 18px;
+    max-height: 18px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    padding: 0px;
+    font-size: 11px;
+    font-weight: 760;
+}
+
+QLabel#PermitTimelineDate {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.2px;
+}
+
+QLabel#PermitTimelineType {
+    font-size: 11px;
+    font-weight: 730;
+    letter-spacing: 0.26px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    padding: 3px 8px;
+}
+
+QLabel#PermitTimelineSummary {
+    font-size: 14px;
+    font-weight: 710;
+    letter-spacing: 0.15px;
+}
+
+QLabel#PermitTimelineDetail {
+    font-size: 12px;
+    font-weight: 560;
+    letter-spacing: 0.14px;
+}
+
+QLabel#PermitTimelineConnector {
+    min-width: 16px;
+    max-width: 16px;
+    min-height: 16px;
+    max-height: 16px;
+    padding: 0px;
+    background: transparent;
+}
+
+QLabel#TrackerPanelHint[timeline="true"] {
+    font-size: 12px;
+}
+
+QLabel#TrackerPanelEmptyState[timeline="true"] {
+    font-size: 16px;
 }
 
 QPushButton#PermitFolderNavButton {
@@ -369,11 +941,56 @@ QLabel#PermitFormTitle {
     letter-spacing: 0.4px;
 }
 
+QWidget#PermitFormView QLabel#PermitFormTitle {
+    font-size: 23px;
+}
+
+QWidget#PermitFormView QLabel#TrackerPanelMeta {
+    font-size: 14px;
+    font-weight: 640;
+}
+
+QWidget#PermitFormView QLabel#InlineFormFieldLabel {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.22px;
+}
+
 QLineEdit#PermitFormInput,
 QComboBox#PermitFormCombo {
     border-radius: 8px;
     padding: 7px 10px;
     min-height: 30px;
+}
+
+QWidget#PermitFormView QLineEdit#PermitFormInput,
+QWidget#PermitFormView QComboBox#PermitFormCombo {
+    font-size: 15px;
+}
+
+QWidget#PermitFormView QComboBox#PermitFormCombo QAbstractItemView {
+    font-size: 15px;
+}
+
+QWidget#PermitFormView QFrame#AdminAttachedContactsPane QLabel#AdminSectionTitle {
+    font-size: 15px;
+}
+
+QWidget#PermitFormView QFrame#AdminAttachedContactsPane QLabel#AdminSectionHint {
+    font-size: 13px;
+}
+
+QWidget#PermitFormView QFrame#AdminAttachedContactsPane QLabel#AttachedContactChipTitle {
+    font-size: 15px;
+}
+
+QWidget#PermitFormView QFrame#AdminAttachedContactsPane QLabel#AttachedContactChipLabel,
+QWidget#PermitFormView QFrame#AdminAttachedContactsPane QLabel#AttachedContactChipDetail {
+    font-size: 13px;
+}
+
+QWidget#PermitFormView QFrame#AdminAttachedContactsPane QPushButton#TrackerPanelActionButton {
+    font-size: 15px;
 }
 
 QPushButton#PermitFormSecondaryButton,
@@ -382,6 +999,63 @@ QPushButton#PermitFormPrimaryButton {
     font-weight: 650;
     border-radius: 8px;
     padding: 8px 14px;
+}
+
+QWidget#PermitFormView QPushButton#PermitFormSecondaryButton,
+QWidget#PermitFormView QPushButton#PermitFormPrimaryButton {
+    font-size: 15px;
+}
+
+QWidget#PermitFormView QLabel#AdminDirtyBubble {
+    font-size: 13px;
+}
+
+QWidget#DocumentTemplatesView QLabel#TrackerPanelTitle {
+    font-size: 24px;
+}
+
+QWidget#DocumentTemplatesView QLabel#TrackerPanelMeta {
+    font-size: 13px;
+}
+
+QWidget#DocumentTemplatesView QLabel#AdminModeTitle,
+QWidget#DocumentTemplatesView QLabel#AdminSectionTitle,
+QWidget#DocumentTemplatesView QLabel#AdminListTitleChip,
+QWidget#DocumentTemplatesView QLabel#DocumentChecklistSlotTitle {
+    font-size: 15px;
+}
+
+QWidget#DocumentTemplatesView QLabel#AdminSectionHint,
+QWidget#DocumentTemplatesView QLabel#AdminInputShellLabel,
+QWidget#DocumentTemplatesView QLabel#AdminDirtyBubble,
+QWidget#DocumentTemplatesView QLabel#DocumentChecklistSlotMeta,
+QWidget#DocumentTemplatesView QLabel#DocumentChecklistSlotBadge,
+QWidget#DocumentTemplatesView QLabel#DocumentChecklistSlotCount {
+    font-size: 13px;
+}
+
+QWidget#DocumentTemplatesView QLabel#AdminListEmptyState,
+QWidget#DocumentTemplatesView QPushButton#TrackerPanelActionButton[adminPrimaryCta="true"] {
+    font-size: 17px;
+}
+
+QWidget#DocumentTemplatesView QPushButton#TrackerPanelActionButton,
+QWidget#DocumentTemplatesView QPushButton#PermitFormDangerButton,
+QWidget#DocumentTemplatesView QPushButton#PermitFormPrimaryButton,
+QWidget#DocumentTemplatesView QPushButton#PermitFormSecondaryButton {
+    font-size: 14px;
+}
+
+QWidget#DocumentTemplatesView QLineEdit#PermitFormInput,
+QWidget#DocumentTemplatesView QComboBox#PermitFormCombo,
+QWidget#DocumentTemplatesView QLineEdit#TrackerPanelSearch,
+QWidget#DocumentTemplatesView QComboBox#TrackerPanelFilter {
+    font-size: 14px;
+}
+
+QWidget#DocumentTemplatesView QComboBox#PermitFormCombo QAbstractItemView,
+QWidget#DocumentTemplatesView QComboBox#TrackerPanelFilter QAbstractItemView {
+    font-size: 14px;
 }
 
 QPushButton#PermitFormDangerButton {

@@ -9,19 +9,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from erpermitsys.app.tracker_models import TrackerDataBundle
+from erpermitsys.app.tracker_models import TrackerDataBundleV3
 
 
 BACKEND_LOCAL_JSON = "local_json"
 BACKEND_SUPABASE = "supabase"
 DEFAULT_DATA_FILE_NAME = "permit_tracker_data.json"
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _APP_ID = "erpermitsys"
 
 
 @dataclass(frozen=True, slots=True)
 class DataLoadResult:
-    bundle: TrackerDataBundle
+    bundle: TrackerDataBundleV3
     source: str = "primary"
     warning: str = ""
 
@@ -40,7 +40,7 @@ class TrackerDataStore(Protocol):
     def load_bundle(self) -> DataLoadResult:
         raise NotImplementedError
 
-    def save_bundle(self, bundle: TrackerDataBundle) -> None:
+    def save_bundle(self, bundle: TrackerDataBundleV3) -> None:
         raise NotImplementedError
 
 
@@ -71,7 +71,7 @@ class LocalJsonDataStore:
     def load_bundle(self) -> DataLoadResult:
         primary_path = self.storage_file_path
         if not primary_path.exists():
-            return DataLoadResult(bundle=TrackerDataBundle(), source="empty")
+            return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty")
 
         try:
             bundle = self._read_bundle(primary_path)
@@ -91,14 +91,14 @@ class LocalJsonDataStore:
                         f"Primary error: {primary_error}. Backup error: {backup_error}."
                     )
                     return DataLoadResult(
-                        bundle=TrackerDataBundle(),
+                        bundle=TrackerDataBundleV3(),
                         source="empty",
                         warning=warning,
                     )
             warning = f"Primary data file could not be read: {primary_error}."
-            return DataLoadResult(bundle=TrackerDataBundle(), source="empty", warning=warning)
+            return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
 
-    def save_bundle(self, bundle: TrackerDataBundle) -> None:
+    def save_bundle(self, bundle: TrackerDataBundleV3) -> None:
         self.data_root.mkdir(parents=True, exist_ok=True)
         payload = {
             "app": _APP_ID,
@@ -109,14 +109,14 @@ class LocalJsonDataStore:
         }
         self._write_atomic_json(payload)
 
-    def _read_bundle(self, path: Path) -> TrackerDataBundle:
+    def _read_bundle(self, path: Path) -> TrackerDataBundleV3:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ValueError("Storage payload must be a JSON object")
         data_payload = raw.get("data")
         if isinstance(data_payload, dict):
-            return TrackerDataBundle.from_payload(data_payload)
-        return TrackerDataBundle.from_payload(raw)
+            return TrackerDataBundleV3.from_payload(data_payload)
+        return TrackerDataBundleV3.from_payload(raw)
 
     def _write_atomic_json(self, payload: dict[str, object]) -> None:
         target_path = self.storage_file_path
@@ -166,7 +166,7 @@ class SupabaseDataStore:
             "Supabase data backend is not implemented yet. Use local_json for now."
         )
 
-    def save_bundle(self, bundle: TrackerDataBundle) -> None:
+    def save_bundle(self, bundle: TrackerDataBundleV3) -> None:
         _ = bundle
         raise NotImplementedError(
             "Supabase data backend is not implemented yet. Use local_json for now."

@@ -48,24 +48,99 @@ QWidget#AppScene {
     background: transparent;
 }
 
-QFrame#TrackerPanel {
+QWidget#BackgroundWebView {
+    background: transparent;
+}
+
+QTabWidget#ContactsJurisdictionsTabs::pane {
+    border: none;
     background: rgba(23, 34, 47, 192);
-    border: 1px solid rgba(93, 123, 153, 170);
+    border-radius: 9px;
+}
+
+QTabWidget#ContactsJurisdictionsTabs QTabBar::tab {
+    color: rgba(201, 221, 243, 232);
+    border: 1px solid rgba(85, 114, 143, 196);
+    background: rgba(36, 52, 70, 224);
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 7px 12px;
+}
+
+QTabWidget#ContactsJurisdictionsTabs QTabBar::tab:selected {
+    color: rgba(239, 247, 255, 246);
+    border-color: rgba(149, 200, 244, 230);
+    background: rgba(64, 101, 137, 238);
+}
+
+QTabWidget#ContactsJurisdictionsTabs QTabBar::tab:!selected:hover {
+    border-color: rgba(121, 170, 216, 222);
+    background: rgba(45, 66, 89, 234);
+}
+
+QFrame#TrackerPanelsShell {
+    border: none;
+    border-radius: 18px;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(8, 16, 24, 236),
+        stop: 1 rgba(6, 13, 20, 232)
+    );
+}
+
+QFrame#TrackerPanel {
+    background: rgba(24, 36, 50, 216);
+    border: none;
+}
+
+QFrame#TrackerPanel[panelRole="address"] {
+    background: rgba(25, 37, 52, 220);
+    border: 1px solid rgba(92, 124, 156, 220);
+}
+
+QFrame#TrackerPanel[panelRole="permit"] {
+    background: rgba(27, 41, 56, 236);
+}
+
+QFrame#TrackerPanel[panelRole="permit"][contextual="true"] {
+    background: rgba(23, 36, 50, 232);
+}
+
+QFrame#TrackerPanel[panelRole="workspace"] {
+    background: rgba(38, 57, 78, 248);
 }
 
 QFrame#TrackerPanel[active="true"] {
-    background: rgba(31, 46, 64, 222);
-    border: 2px solid rgba(140, 192, 242, 230);
+    background: rgba(46, 70, 95, 250);
+    border: none;
+}
+
+QFrame#PermitWorkspaceBlurOverlay {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 rgba(6, 11, 17, 94),
+        stop: 1 rgba(3, 7, 12, 118)
+    );
 }
 
 QLabel#TrackerPanelTitle {
     color: rgba(224, 236, 249, 236);
 }
 
+QToolButton#TrackerPanelCollapseButton {
+    color: rgba(228, 238, 250, 240);
+}
+
 QPushButton#TrackerPanelActionButton {
     color: rgba(232, 241, 252, 242);
     border: 1px solid rgba(107, 145, 184, 194);
     background: rgba(54, 78, 103, 182);
+}
+
+QPushButton#TrackerPanelActionButton:disabled {
+    color: rgba(152, 176, 202, 168);
+    border-color: rgba(84, 113, 142, 158);
+    background: rgba(41, 59, 77, 156);
 }
 
 QPushButton#TrackerPanelActionButton:hover {
@@ -77,6 +152,36 @@ QPushButton#TrackerPanelActionButton:pressed {
     background: rgba(46, 69, 92, 222);
 }
 
+QPushButton#TrackerPanelActionButton[addPermitPrimary="true"] {
+    color: rgba(242, 249, 255, 248);
+    border-color: rgba(129, 183, 234, 232);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(61, 122, 178, 242),
+        stop: 1 rgba(44, 95, 146, 242)
+    );
+}
+
+QPushButton#TrackerPanelActionButton[addPermitPrimary="true"]:hover {
+    border-color: rgba(154, 206, 247, 240);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(74, 138, 198, 246),
+        stop: 1 rgba(57, 110, 164, 246)
+    );
+}
+
+QPushButton#TrackerPanelActionButton[addPermitPrimary="true"]:pressed {
+    border-color: rgba(131, 185, 230, 240);
+    background: rgba(49, 97, 146, 244);
+}
+
+QPushButton#TrackerPanelActionButton[addPermitPrimary="true"]:disabled {
+    color: rgba(194, 215, 237, 206);
+    border-color: rgba(94, 125, 156, 182);
+    background: rgba(53, 79, 105, 188);
+}
+
 QLineEdit#TrackerPanelSearch,
 QComboBox#TrackerPanelFilter {
     color: rgba(214, 228, 245, 238);
@@ -86,8 +191,8 @@ QComboBox#TrackerPanelFilter {
 
 QLineEdit#TrackerPanelSearch:focus,
 QComboBox#TrackerPanelFilter:focus {
-    border-color: rgba(128, 181, 233, 236);
-    background: rgba(38, 57, 77, 238);
+    border-color: rgba(154, 203, 247, 242);
+    background: rgba(46, 70, 94, 242);
 }
 
 QComboBox#TrackerPanelFilter QAbstractItemView {
@@ -100,6 +205,196 @@ QComboBox#TrackerPanelFilter QAbstractItemView {
 
 QLabel#TrackerPanelMeta {
     color: rgba(170, 196, 224, 224);
+}
+
+QLabel#TrackerPanelMeta[permitHeader="true"] {
+    color: rgba(188, 211, 235, 232);
+}
+
+QLabel#TrackerPanelHint {
+    color: rgba(163, 191, 219, 218);
+}
+
+QLabel#PermitWorkspaceNextStepNote {
+    color: rgba(210, 227, 245, 236);
+    border-color: rgba(86, 121, 154, 212);
+    background: rgba(34, 53, 72, 232);
+}
+
+QLabel#TrackerPanelSubsectionTitle {
+    color: rgba(177, 205, 232, 226);
+}
+
+QLabel#TrackerPanelEmptyState {
+    color: rgba(191, 214, 237, 236);
+    border-color: rgba(97, 131, 164, 214);
+    background: rgba(31, 48, 67, 236);
+}
+
+QLabel#AdminModeTitle {
+    color: rgba(226, 239, 252, 238);
+}
+
+QLabel#AdminDirtyBubble[dirtyState="clean"] {
+    color: rgba(177, 232, 211, 238);
+    border-color: rgba(87, 150, 128, 222);
+    background: rgba(44, 83, 69, 234);
+}
+
+QLabel#AdminDirtyBubble[dirtyState="dirty"] {
+    color: rgba(255, 212, 191, 240);
+    border-color: rgba(169, 105, 82, 226);
+    background: rgba(93, 55, 43, 236);
+}
+
+QLabel#AdminDirtyBubble[dirtyState="empty"] {
+    color: rgba(178, 198, 218, 232);
+    border-color: rgba(104, 129, 156, 218);
+    background: rgba(45, 61, 79, 236);
+}
+
+QFrame#AdminListPane {
+    border: none;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(20, 31, 44, 230),
+        stop: 1 rgba(16, 25, 36, 226)
+    );
+}
+
+QLabel#AdminSectionTitle {
+    color: rgba(227, 239, 252, 240);
+}
+
+QLabel#AdminListTitleChip {
+    color: rgba(233, 243, 253, 244);
+    background: rgba(34, 52, 72, 242);
+}
+
+QLabel#AdminSectionHint {
+    color: rgba(165, 191, 220, 224);
+}
+
+QLabel#AdminListEmptyState {
+    color: rgba(167, 195, 222, 220);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 12px 14px;
+}
+
+QFrame#AdminInputShell {
+    background: rgba(28, 45, 62, 238);
+}
+
+QFrame#PermitFormCard[adminForm="true"] QFrame#AdminInputShell {
+    background: rgba(31, 50, 70, 242);
+}
+
+QFrame#AdminAttachedContactsPane {
+    border: 1px solid rgba(77, 109, 141, 212);
+    background: rgba(22, 35, 50, 236);
+}
+
+QLabel#AdminInputShellLabel {
+    color: rgba(180, 206, 232, 234);
+}
+
+QFrame#AdminHeaderBar {
+    background: rgba(31, 48, 67, 240);
+}
+
+QFrame#PermitFormCard[adminForm="true"] QFrame#AdminHeaderBar {
+    background: rgba(35, 54, 75, 244);
+}
+
+QFrame#AdminListPane QListWidget#TrackerPanelList {
+    border-color: rgba(83, 114, 145, 214);
+    background: rgba(24, 38, 53, 226);
+}
+
+QPushButton#TrackerPanelActionButton[adminPrimaryCta="true"] {
+    color: rgba(242, 249, 255, 246);
+    border-color: rgba(127, 178, 223, 230);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(67, 104, 141, 240),
+        stop: 1 rgba(56, 89, 124, 240)
+    );
+}
+
+QPushButton#TrackerPanelActionButton[adminPrimaryCta="true"]:hover {
+    border-color: rgba(154, 201, 242, 236);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(76, 117, 156, 244),
+        stop: 1 rgba(64, 100, 138, 244)
+    );
+}
+
+QPushButton#TrackerPanelActionButton[adminPrimaryCta="true"]:pressed {
+    background: rgba(58, 90, 126, 242);
+}
+
+QPushButton#TrackerPanelActionButton[adminBackButton="true"] {
+    color: rgba(242, 250, 255, 248);
+    border-color: rgba(133, 185, 230, 234);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(66, 108, 148, 244),
+        stop: 1 rgba(54, 91, 128, 244)
+    );
+}
+
+QPushButton#TrackerPanelActionButton[adminBackButton="true"]:hover {
+    border-color: rgba(159, 207, 247, 240);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(75, 119, 161, 246),
+        stop: 1 rgba(63, 100, 140, 246)
+    );
+}
+
+QPushButton#TrackerPanelActionButton[adminBackButton="true"]:pressed {
+    background: rgba(55, 89, 126, 244);
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="update"][bundleEditing="true"] {
+    color: rgba(242, 250, 255, 246);
+    border-color: rgba(110, 194, 166, 234);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(56, 122, 102, 242),
+        stop: 1 rgba(45, 98, 83, 242)
+    );
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="update"][bundleEditing="true"]:hover {
+    border-color: rgba(134, 213, 186, 238);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 rgba(64, 136, 114, 246),
+        stop: 1 rgba(52, 109, 93, 246)
+    );
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="update"][bundleEditing="true"]:pressed {
+    background: rgba(43, 95, 81, 244);
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="cancel"][bundleEditing="true"] {
+    color: rgba(185, 208, 231, 234);
+    border-color: rgba(109, 137, 167, 216);
+    background: rgba(47, 67, 89, 236);
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="cancel"][bundleEditing="true"]:hover {
+    color: rgba(202, 223, 243, 240);
+    border-color: rgba(131, 165, 198, 228);
+    background: rgba(57, 80, 105, 240);
+}
+
+QPushButton#TrackerPanelActionButton[bundleAction="cancel"][bundleEditing="true"]:pressed {
+    background: rgba(44, 63, 85, 244);
 }
 
 QListWidget#TrackerPanelList {
@@ -215,6 +510,102 @@ QLabel#TrackerListFieldValue[field="added"] {
     color: rgba(165, 191, 218, 200);
 }
 
+QWidget#AttachedContactsHost {
+    background: transparent;
+}
+
+QFrame#AttachedContactChip {
+    border-color: rgba(92, 124, 156, 188);
+    background: rgba(34, 51, 70, 228);
+}
+
+QFrame#AttachedContactChip:hover {
+    border-color: rgba(140, 189, 236, 228);
+    background: rgba(45, 68, 92, 236);
+}
+
+QFrame#AttachedContactChipMetaGroup {
+    border-color: rgba(0, 0, 0, 0);
+    background: rgba(18, 31, 45, 214);
+}
+
+QFrame#AttachedContactChip:hover QFrame#AttachedContactChipMetaGroup {
+    border-color: rgba(0, 0, 0, 0);
+    background: rgba(22, 38, 56, 226);
+}
+
+QFrame#AttachedContactChipMetaGroup QLabel#AttachedContactChipLabel {
+    color: rgba(169, 205, 234, 238);
+}
+
+QFrame#AttachedContactChipMetaGroup QLabel#AttachedContactChipDetail {
+    color: rgba(218, 233, 247, 238);
+}
+
+QFrame#AttachedContactChipValueGroup {
+    border-color: rgba(0, 0, 0, 0);
+    background: rgba(15, 27, 40, 228);
+}
+
+QFrame#AttachedContactChip:hover QFrame#AttachedContactChipValueGroup {
+    border-color: rgba(0, 0, 0, 0);
+    background: rgba(20, 35, 51, 236);
+}
+
+QFrame#AttachedContactChipValueGroup QLabel#AttachedContactChipDetail {
+    color: rgba(220, 234, 247, 240);
+}
+
+QFrame#AttachedContactChipMetaRow {
+    border-color: rgba(95, 129, 161, 202);
+    background: rgba(24, 39, 54, 194);
+}
+
+QFrame#AttachedContactChip:hover QFrame#AttachedContactChipMetaRow {
+    border-color: rgba(137, 186, 232, 226);
+    background: rgba(31, 52, 74, 214);
+}
+
+QLabel#AttachedContactChipLabel {
+    color: rgba(164, 200, 232, 238);
+}
+
+QLabel#AttachedContactChipTitle {
+    color: rgba(220, 235, 251, 244);
+}
+
+QLabel#AttachedContactChipDetail {
+    color: rgba(189, 214, 236, 228);
+}
+
+QFrame#AttachedContactChipMetaRow QLabel#AttachedContactChipDetail {
+    color: rgba(214, 230, 246, 238);
+}
+
+QPushButton#AttachedContactChipRemoveButton {
+    color: rgba(174, 199, 226, 230);
+    border-color: rgba(108, 140, 171, 206);
+    background: rgba(46, 67, 90, 236);
+}
+
+QPushButton#AttachedContactChipEditButton {
+    color: rgba(182, 210, 236, 232);
+    border-color: rgba(107, 143, 178, 210);
+    background: rgba(49, 74, 100, 238);
+}
+
+QPushButton#AttachedContactChipEditButton:hover {
+    color: rgba(243, 250, 255, 246);
+    border-color: rgba(139, 192, 240, 236);
+    background: rgba(78, 126, 174, 240);
+}
+
+QPushButton#AttachedContactChipRemoveButton:hover {
+    color: rgba(255, 244, 246, 246);
+    border-color: rgba(215, 123, 139, 238);
+    background: rgba(170, 79, 94, 238);
+}
+
 QFrame#TrackerListDot[field="client"] {
     background: rgba(96, 186, 242, 240);
 }
@@ -276,9 +667,54 @@ QFrame#PermitFormCard {
     border: 1px solid rgba(91, 120, 149, 188);
 }
 
+QFrame#PermitFormCard[adminForm="true"] {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(44, 66, 89, 242),
+        stop: 1 rgba(35, 53, 72, 240)
+    );
+    border: none;
+}
+
+QFrame#PermitFormCard[adminForm="true"] QLabel#AdminSectionTitle {
+    color: rgba(236, 246, 255, 246);
+}
+
+QFrame#PermitFormCard[adminForm="true"] QLabel#AdminSectionHint {
+    color: rgba(192, 216, 240, 228);
+}
+
+QFrame#PermitWorkspaceFocusRegion {
+    background: rgba(18, 31, 45, 236);
+    border: none;
+}
+
+QWidget#PermitWorkspaceSummaryGrid {
+    background: transparent;
+    border: none;
+}
+
+QFrame#PermitWorkspaceInfoCell {
+    border-color: rgba(104, 142, 173, 226);
+    background: rgba(42, 60, 79, 244);
+}
+
+QLabel#PermitWorkspaceInfoLabel {
+    color: rgba(162, 191, 220, 230);
+}
+
+QLabel#PermitWorkspaceInfoValue {
+    color: rgba(232, 244, 255, 246);
+}
+
 QFrame#PermitDocumentsSection {
     background: rgba(29, 44, 60, 232);
     border: 1px solid rgba(88, 120, 150, 186);
+}
+
+QFrame#PermitDocumentsSection[nextActionPanel="true"] {
+    border: 2px solid rgba(121, 179, 230, 238);
+    background: rgba(33, 51, 69, 238);
 }
 
 QLabel#PermitDocumentsTitle {
@@ -287,6 +723,162 @@ QLabel#PermitDocumentsTitle {
 
 QLabel#PermitDocumentStatus {
     color: rgba(164, 191, 219, 214);
+}
+
+QFrame#DocumentChecklistSlotCard {
+    border-color: rgba(84, 116, 146, 206);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(34, 51, 69, 238),
+        stop: 1 rgba(29, 45, 61, 236)
+    );
+}
+
+QFrame#DocumentChecklistSlotCard:hover {
+    border-color: rgba(123, 172, 217, 230);
+    background: rgba(42, 64, 86, 242);
+}
+
+QFrame#DocumentChecklistSlotCard[selected="true"] {
+    border-color: rgba(150, 199, 243, 238);
+    background: rgba(53, 79, 104, 244);
+}
+
+QLabel#DocumentChecklistSlotIcon {
+    border: none;
+    background: transparent;
+}
+
+QLabel#DocumentChecklistSlotTitle {
+    color: rgba(232, 243, 255, 246);
+}
+
+QLabel#DocumentChecklistSlotMeta {
+    color: rgba(171, 197, 225, 228);
+}
+
+QLabel#DocumentChecklistSlotBadge {
+    color: rgba(211, 228, 245, 238);
+    border-color: rgba(98, 133, 165, 214);
+    background: rgba(44, 66, 88, 236);
+}
+
+QLabel#DocumentChecklistSlotBadge[badgeRole="required"] {
+    color: rgba(255, 217, 187, 244);
+    border-color: rgba(165, 118, 84, 230);
+    background: rgba(91, 59, 42, 240);
+}
+
+QLabel#DocumentChecklistSlotBadge[badgeRole="optional"] {
+    color: rgba(199, 219, 241, 236);
+    border-color: rgba(94, 128, 159, 212);
+    background: rgba(40, 60, 82, 236);
+}
+
+QLabel#DocumentChecklistSlotBadge[badgeRole="missing"] {
+    color: rgba(255, 206, 188, 244);
+    border-color: rgba(163, 100, 78, 228);
+    background: rgba(90, 50, 39, 240);
+}
+
+QLabel#DocumentChecklistSlotBadge[badgeRole="uploaded"] {
+    color: rgba(201, 229, 253, 244);
+    border-color: rgba(102, 152, 197, 224);
+    background: rgba(45, 76, 106, 238);
+}
+
+QLabel#DocumentChecklistSlotBadge[badgeRole="accepted"] {
+    color: rgba(192, 241, 221, 244);
+    border-color: rgba(86, 145, 123, 226);
+    background: rgba(38, 81, 65, 240);
+}
+
+QLabel#DocumentChecklistSlotBadge[badgeRole="rejected"] {
+    color: rgba(255, 205, 211, 246);
+    border-color: rgba(166, 97, 109, 228);
+    background: rgba(96, 46, 57, 240);
+}
+
+QLabel#DocumentChecklistSlotBadge[badgeRole="superseded"] {
+    color: rgba(218, 213, 242, 242);
+    border-color: rgba(115, 114, 159, 222);
+    background: rgba(54, 52, 83, 240);
+}
+
+QLabel#DocumentChecklistSlotCount {
+    color: rgba(170, 198, 225, 226);
+}
+
+QFrame#PermitDocumentFileCard {
+    border-color: rgba(84, 116, 146, 206);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(34, 51, 69, 238),
+        stop: 1 rgba(29, 45, 61, 236)
+    );
+}
+
+QFrame#PermitDocumentFileCard:hover {
+    border-color: rgba(123, 172, 217, 230);
+    background: rgba(42, 64, 86, 242);
+}
+
+QFrame#PermitDocumentFileCard[selected="true"] {
+    border-color: rgba(150, 199, 243, 238);
+    background: rgba(53, 79, 104, 244);
+}
+
+QLabel#PermitDocumentFileTitle {
+    color: rgba(232, 243, 255, 246);
+}
+
+QLabel#PermitDocumentFileMeta {
+    color: rgba(171, 197, 225, 228);
+}
+
+QLabel#PermitDocumentFileExt {
+    color: rgba(211, 228, 245, 238);
+    border-color: rgba(98, 133, 165, 214);
+    background: rgba(44, 66, 88, 236);
+}
+
+QFrame#PermitTimelineBubble {
+    border-color: rgba(89, 121, 152, 204);
+    background: rgba(36, 53, 72, 236);
+}
+
+QPushButton#PermitTimelineDeleteButton {
+    color: rgba(255, 194, 202, 240);
+    border: 1px solid rgba(172, 92, 109, 214);
+    background: rgba(92, 43, 54, 232);
+}
+
+QPushButton#PermitTimelineDeleteButton:hover {
+    color: rgba(255, 220, 224, 246);
+    border-color: rgba(214, 123, 141, 232);
+    background: rgba(121, 52, 67, 240);
+}
+
+QPushButton#PermitTimelineDeleteButton:pressed {
+    background: rgba(101, 42, 56, 244);
+}
+
+QLabel#PermitTimelineDate {
+    color: rgba(163, 190, 218, 224);
+}
+
+QLabel#PermitTimelineType {
+    color: rgba(228, 240, 253, 242);
+    border-color: rgba(116, 161, 203, 224);
+    background: rgba(62, 97, 132, 238);
+}
+
+QLabel#PermitTimelineSummary {
+    color: rgba(232, 243, 255, 246);
+}
+
+QLabel#PermitTimelineDetail {
+    color: rgba(177, 202, 228, 226);
 }
 
 QPushButton#PermitFolderNavButton {
@@ -394,8 +986,8 @@ QComboBox#PermitFormCombo {
 
 QLineEdit#PermitFormInput:focus,
 QComboBox#PermitFormCombo:focus {
-    border-color: rgba(125, 178, 231, 236);
-    background: rgba(39, 58, 78, 244);
+    border-color: rgba(154, 203, 247, 242);
+    background: rgba(46, 70, 94, 246);
 }
 
 QComboBox#PermitFormCombo QAbstractItemView {
@@ -445,6 +1037,42 @@ QPushButton#PermitFormDangerButton:hover {
 
 QPushButton#PermitFormDangerButton:pressed {
     background: rgba(130, 55, 70, 242);
+}
+
+QFrame#PermitFormCard[adminForm="true"] QPushButton#PermitFormDangerButton {
+    color: rgba(234, 171, 182, 230);
+    border: 1px solid rgba(206, 108, 124, 212);
+    background: rgba(0, 0, 0, 0);
+}
+
+QFrame#PermitFormCard[adminForm="true"] QPushButton#PermitFormDangerButton:hover {
+    color: rgba(244, 194, 203, 238);
+    border-color: rgba(225, 132, 149, 230);
+    background: rgba(158, 66, 84, 54);
+}
+
+QFrame#PermitFormCard[adminForm="true"] QPushButton#PermitFormDangerButton:pressed {
+    color: rgba(246, 206, 213, 238);
+    border-color: rgba(210, 114, 130, 226);
+    background: rgba(147, 59, 76, 72);
+}
+
+QPushButton#PermitFormDangerButton[adminHeaderDanger="true"] {
+    color: rgba(234, 171, 182, 230);
+    border: 1px solid rgba(206, 108, 124, 212);
+    background: rgba(0, 0, 0, 0);
+}
+
+QPushButton#PermitFormDangerButton[adminHeaderDanger="true"]:hover {
+    color: rgba(244, 194, 203, 238);
+    border-color: rgba(225, 132, 149, 230);
+    background: rgba(158, 66, 84, 54);
+}
+
+QPushButton#PermitFormDangerButton[adminHeaderDanger="true"]:pressed {
+    color: rgba(246, 206, 213, 238);
+    border-color: rgba(210, 114, 130, 226);
+    background: rgba(147, 59, 76, 72);
 }
 
 QDialog#ContactEntryDialog {
