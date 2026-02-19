@@ -465,6 +465,32 @@ QScrollArea#InlineAttachedContactsScroll > QWidget > QWidget {
     background: transparent;
 }
 
+QScrollArea#PermitWorkspaceDetailScroll {
+    border: none;
+    background: transparent;
+}
+
+QScrollArea#PermitWorkspaceDetailScroll > QWidget {
+    background: transparent;
+}
+
+QScrollArea#PermitWorkspaceDetailScroll > QWidget > QWidget {
+    background: transparent;
+}
+
+QScrollArea#AdminEditorScroll {
+    border: none;
+    background: transparent;
+}
+
+QScrollArea#AdminEditorScroll > QWidget {
+    background: transparent;
+}
+
+QScrollArea#AdminEditorScroll > QWidget > QWidget {
+    background: transparent;
+}
+
 QFrame#AttachedContactChip {
     border-radius: 11px;
     border: 1px solid transparent;
@@ -617,6 +643,23 @@ QWidget#ContactsJurisdictionsView QComboBox#PermitFormCombo QAbstractItemView {
 }
 
 QWidget#PermitFormView {
+    background: transparent;
+}
+
+QScrollArea#PermitInlineFormScroll {
+    border: none;
+    background: transparent;
+}
+
+QScrollArea#PermitInlineFormScroll > QWidget {
+    background: transparent;
+}
+
+QScrollArea#PermitInlineFormScroll > QWidget > QWidget {
+    background: transparent;
+}
+
+QWidget#PermitInlineFormScrollContent {
     background: transparent;
 }
 

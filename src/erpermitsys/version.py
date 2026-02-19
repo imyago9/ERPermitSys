@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-APP_VERSION = "0.0.8"
+APP_VERSION = "0.0.9"
 GITHUB_RELEASE_REPO = "imyago9/ERPermitSys"
 GITHUB_RELEASE_ASSET_NAME = "erpermitsys-windows.zip"

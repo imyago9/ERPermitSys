@@ -372,6 +372,73 @@ def _prefill_permit_events_from_milestones(
     return [event for _index, event in rows]
 
 
+class _EdgeLockedScrollArea(QScrollArea):
+    """Prevents wheel overscroll events from bubbling at scroll boundaries."""
+
+    def wheelEvent(self, event) -> None:
+        angle_x = 0
+        angle_y = 0
+        try:
+            angle_delta = event.angleDelta()
+            if angle_delta is not None:
+                angle_x = int(angle_delta.x())
+                angle_y = int(angle_delta.y())
+        except Exception:
+            angle_x = 0
+            angle_y = 0
+
+        pixel_x = 0
+        pixel_y = 0
+        try:
+            pixel_delta = event.pixelDelta()
+            if pixel_delta is not None:
+                pixel_x = int(pixel_delta.x())
+                pixel_y = int(pixel_delta.y())
+        except Exception:
+            pixel_x = 0
+            pixel_y = 0
+
+        # Keep wheel-mouse behavior native; only intercept touchpad-style gestures.
+        is_touchpad = (pixel_x != 0 or pixel_y != 0)
+        if not is_touchpad:
+            try:
+                is_touchpad = event.phase() != Qt.ScrollPhase.NoScrollPhase
+            except Exception:
+                is_touchpad = False
+        if not is_touchpad:
+            super().wheelEvent(event)
+            return
+
+        requested_vertical = (pixel_y != 0) or (angle_y != 0)
+        requested_horizontal = (pixel_x != 0) or (angle_x != 0)
+
+        vertical_bar = self.verticalScrollBar()
+        horizontal_bar = self.horizontalScrollBar()
+
+        v_can_scroll = (
+            vertical_bar is not None and int(vertical_bar.maximum()) > int(vertical_bar.minimum())
+        )
+        h_can_scroll = (
+            horizontal_bar is not None and int(horizontal_bar.maximum()) > int(horizontal_bar.minimum())
+        )
+
+        v_before = int(vertical_bar.value()) if vertical_bar is not None else 0
+        h_before = int(horizontal_bar.value()) if horizontal_bar is not None else 0
+
+        super().wheelEvent(event)
+
+        v_after = int(vertical_bar.value()) if vertical_bar is not None else 0
+        h_after = int(horizontal_bar.value()) if horizontal_bar is not None else 0
+        moved = (v_after != v_before) or (h_after != h_before)
+        if moved:
+            return
+
+        # If gesture asked to scroll an axis this area supports but nothing moved,
+        # consume it so boundary overscroll doesn't bubble and repaint/flicker.
+        if ((requested_vertical and v_can_scroll) or (requested_horizontal and h_can_scroll)):
+            event.accept()
+
+
 class PropertyEditorDialog(FramelessDialog):
     def __init__(
         self,
@@ -3025,7 +3092,17 @@ class ErPermitSysWindow(FramelessWindow):
         workspace_lower_width_layout.setContentsMargins(0, 0, 0, 0)
         workspace_lower_width_layout.setSpacing(0)
 
-        workspace_lower_content_host = QWidget(workspace_lower_width_host)
+        workspace_lower_scroll = _EdgeLockedScrollArea(workspace_lower_width_host)
+        workspace_lower_scroll.setObjectName("PermitWorkspaceDetailScroll")
+        workspace_lower_scroll.setWidgetResizable(True)
+        workspace_lower_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        workspace_lower_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        workspace_lower_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        workspace_lower_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        workspace_lower_scroll.viewport().setAutoFillBackground(False)
+        workspace_lower_scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+
+        workspace_lower_content_host = QWidget(workspace_lower_scroll)
         workspace_lower_content_layout = QVBoxLayout(workspace_lower_content_host)
         workspace_lower_content_layout.setContentsMargins(0, 0, 0, 0)
         workspace_lower_content_layout.setSpacing(10)
@@ -3160,7 +3237,7 @@ class ErPermitSysWindow(FramelessWindow):
         timeline_layout.addWidget(timeline_hint, 0)
         self._timeline_hint_label = timeline_hint
 
-        timeline_scroll = QScrollArea(timeline_card)
+        timeline_scroll = _EdgeLockedScrollArea(timeline_card)
         timeline_scroll.setObjectName("PermitTimelineScroll")
         timeline_scroll.setWidgetResizable(False)
         timeline_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -3352,9 +3429,9 @@ class ErPermitSysWindow(FramelessWindow):
         docs_layout.addLayout(docs_actions)
 
         workspace_lower_content_layout.addWidget(docs_card, 1)
-        workspace_lower_width_layout.addStretch(1)
-        workspace_lower_width_layout.addWidget(workspace_lower_content_host, 6)
-        workspace_lower_width_layout.addStretch(1)
+        workspace_lower_scroll.setWidget(workspace_lower_content_host)
+
+        workspace_lower_width_layout.addWidget(workspace_lower_scroll, 1)
         workspace_content_layout.addWidget(workspace_lower_width_host, 1)
         workspace_width_layout.addStretch(1)
         workspace_width_layout.addWidget(workspace_content_host, 6)
@@ -3500,7 +3577,17 @@ class ErPermitSysWindow(FramelessWindow):
         contact_right_layout.setContentsMargins(0, 0, 0, 0)
         contact_right_layout.setSpacing(0)
 
-        contact_form = QFrame(contact_right_host)
+        contact_scroll = _EdgeLockedScrollArea(contact_right_host)
+        contact_scroll.setObjectName("AdminEditorScroll")
+        contact_scroll.setWidgetResizable(True)
+        contact_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contact_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        contact_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        contact_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        contact_scroll.viewport().setAutoFillBackground(False)
+        contact_scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+
+        contact_form = QFrame(contact_scroll)
         contact_form.setObjectName("PermitFormCard")
         contact_form.setProperty("adminForm", "true")
         contact_form.setMinimumWidth(500)
@@ -3738,8 +3825,10 @@ class ErPermitSysWindow(FramelessWindow):
         )
         self._admin_contact_color_shell = contact_color_shell
         contact_form_layout.addWidget(contact_color_shell, 0, Qt.AlignmentFlag.AlignLeft)
+
         contact_right_layout.addStretch(15)
-        contact_right_layout.addWidget(contact_form, 70)
+        contact_scroll.setWidget(contact_form)
+        contact_right_layout.addWidget(contact_scroll, 70)
         contact_right_layout.addStretch(15)
         contact_layout.addWidget(contact_right_host, 3)
 
@@ -3818,7 +3907,17 @@ class ErPermitSysWindow(FramelessWindow):
         jurisdiction_right_layout.setContentsMargins(0, 0, 0, 0)
         jurisdiction_right_layout.setSpacing(0)
 
-        jurisdiction_form = QFrame(jurisdiction_right_host)
+        jurisdiction_scroll = _EdgeLockedScrollArea(jurisdiction_right_host)
+        jurisdiction_scroll.setObjectName("AdminEditorScroll")
+        jurisdiction_scroll.setWidgetResizable(True)
+        jurisdiction_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        jurisdiction_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        jurisdiction_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        jurisdiction_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        jurisdiction_scroll.viewport().setAutoFillBackground(False)
+        jurisdiction_scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+
+        jurisdiction_form = QFrame(jurisdiction_scroll)
         jurisdiction_form.setObjectName("PermitFormCard")
         jurisdiction_form.setProperty("adminForm", "true")
         jurisdiction_form.setMinimumWidth(540)
@@ -4049,8 +4148,10 @@ class ErPermitSysWindow(FramelessWindow):
         )
         self._admin_jurisdiction_color_shell = jurisdiction_color_shell
         jurisdiction_form_layout.addWidget(jurisdiction_color_shell, 0, Qt.AlignmentFlag.AlignLeft)
+
         jurisdiction_right_layout.addStretch(15)
-        jurisdiction_right_layout.addWidget(jurisdiction_form, 70)
+        jurisdiction_scroll.setWidget(jurisdiction_form)
+        jurisdiction_right_layout.addWidget(jurisdiction_scroll, 70)
         jurisdiction_right_layout.addStretch(15)
         jurisdiction_layout.addWidget(jurisdiction_right_host, 3)
 
@@ -4067,12 +4168,29 @@ class ErPermitSysWindow(FramelessWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        row = QHBoxLayout()
+        scroll = _EdgeLockedScrollArea(view)
+        scroll.setObjectName("PermitInlineFormScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        scroll.viewport().setAutoFillBackground(False)
+        scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+
+        scroll_content = QWidget(scroll)
+        scroll_content.setObjectName("PermitInlineFormScrollContent")
+        scroll_content_layout = QVBoxLayout(scroll_content)
+        scroll_content_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_content_layout.setSpacing(0)
+
+        row_host = QWidget(scroll_content)
+        row = QHBoxLayout(row_host)
         row.setContentsMargins(24, 12, 24, 12)
         row.setSpacing(0)
         row.addStretch(13)
 
-        card = QFrame(view)
+        card = QFrame(row_host)
         card.setObjectName("PermitFormCard")
         card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         card_layout = QVBoxLayout(card)
@@ -4081,7 +4199,9 @@ class ErPermitSysWindow(FramelessWindow):
         row.addWidget(card, 0)
 
         row.addStretch(13)
-        layout.addLayout(row, 1)
+        scroll_content_layout.addWidget(row_host, 1)
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, 1)
 
         self._inline_form_cards.append(card)
         return view, card, card_layout
@@ -4214,7 +4334,7 @@ class ErPermitSysWindow(FramelessWindow):
         attached_picker_row.addStretch(1)
         attached_panel_layout.addWidget(attached_picker_host, 0, Qt.AlignmentFlag.AlignLeft)
 
-        attached_contacts_scroll = QScrollArea(attached_panel)
+        attached_contacts_scroll = _EdgeLockedScrollArea(attached_panel)
         attached_contacts_scroll.setObjectName("InlineAttachedContactsScroll")
         attached_contacts_scroll.setWidgetResizable(True)
         attached_contacts_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -4442,7 +4562,7 @@ class ErPermitSysWindow(FramelessWindow):
         attached_picker_row.addStretch(1)
         attached_panel_layout.addWidget(attached_picker_host, 0, Qt.AlignmentFlag.AlignLeft)
 
-        attached_contacts_scroll = QScrollArea(attached_panel)
+        attached_contacts_scroll = _EdgeLockedScrollArea(attached_panel)
         attached_contacts_scroll.setObjectName("InlineAttachedContactsScroll")
         attached_contacts_scroll.setWidgetResizable(True)
         attached_contacts_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -4607,7 +4727,17 @@ class ErPermitSysWindow(FramelessWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        form = QFrame(right_host)
+        template_scroll = _EdgeLockedScrollArea(right_host)
+        template_scroll.setObjectName("AdminEditorScroll")
+        template_scroll.setWidgetResizable(True)
+        template_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        template_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        template_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        template_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        template_scroll.viewport().setAutoFillBackground(False)
+        template_scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+
+        form = QFrame(template_scroll)
         form.setObjectName("PermitFormCard")
         form.setProperty("adminForm", "true")
         form_layout = QVBoxLayout(form)
@@ -4799,7 +4929,8 @@ class ErPermitSysWindow(FramelessWindow):
         form_layout.addWidget(slots_list, 1)
 
         right_layout.addStretch(15)
-        right_layout.addWidget(form, 70)
+        template_scroll.setWidget(form)
+        right_layout.addWidget(template_scroll, 70)
         right_layout.addStretch(15)
         content_layout.addWidget(right_host, 3)
         content_layout.setStretch(0, 1)
