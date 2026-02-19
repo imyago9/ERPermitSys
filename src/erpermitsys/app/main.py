@@ -10,7 +10,7 @@ from typing import Callable, Sequence
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from PySide6.QtCore import QEasingCurve, QEvent, QFileInfo, QObject, QPoint, QPropertyAnimation, QRect, QTimer, Qt, QUrl
+from PySide6.QtCore import QEasingCurve, QEvent, QFileInfo, QObject, QPoint, QPropertyAnimation, QRect, QSize, QTimer, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -91,6 +91,7 @@ from erpermitsys.app.tracker_models import (
     event_type_label,
     normalize_event_type,
     normalize_list_color,
+    normalize_document_review_status,
     normalize_parcel_id,
     normalize_permit_type,
     normalize_slot_id,
@@ -1702,6 +1703,7 @@ class DocumentChecklistSlotCard(QFrame):
         required: bool,
         status: str,
         file_count: int,
+        status_counts: dict[str, int] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -1753,11 +1755,45 @@ class DocumentChecklistSlotCard(QFrame):
         required_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badges.addWidget(required_badge, 0, Qt.AlignmentFlag.AlignRight)
 
-        status_badge = QLabel(normalize_slot_status(status).replace("_", " ").title(), self)
-        status_badge.setObjectName("DocumentChecklistSlotBadge")
-        status_badge.setProperty("badgeRole", normalize_slot_status(status))
-        status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badges.addWidget(status_badge, 0, Qt.AlignmentFlag.AlignRight)
+        normalized_status_counts: dict[str, int] = {}
+        for raw_status, raw_count in (status_counts or {}).items():
+            normalized_key = normalize_slot_status(raw_status)
+            count_value = max(0, int(raw_count or 0))
+            if count_value <= 0:
+                continue
+            normalized_status_counts[normalized_key] = (
+                normalized_status_counts.get(normalized_key, 0) + count_value
+            )
+
+        ordered_statuses: list[tuple[str, int]] = []
+        for status_key in ("accepted", "rejected", "uploaded", "superseded"):
+            count_value = normalized_status_counts.get(status_key, 0)
+            if count_value > 0:
+                ordered_statuses.append((status_key, count_value))
+
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(4)
+        status_row.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        if not ordered_statuses:
+            status_badge = QLabel(normalize_slot_status(status).replace("_", " ").title(), self)
+            status_badge.setObjectName("DocumentChecklistSlotBadge")
+            status_badge.setProperty("badgeRole", normalize_slot_status(status))
+            status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            status_row.addWidget(status_badge, 0, Qt.AlignmentFlag.AlignRight)
+        else:
+            for status_key, count_value in ordered_statuses:
+                status_badge = QLabel(
+                    f"{status_key.replace('_', ' ').title()} ({count_value})",
+                    self,
+                )
+                status_badge.setObjectName("DocumentChecklistSlotBadge")
+                status_badge.setProperty("badgeRole", status_key)
+                status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                status_row.addWidget(status_badge, 0, Qt.AlignmentFlag.AlignRight)
+
+        badges.addLayout(status_row)
 
         count_label = QLabel(f"{max(0, int(file_count))} file(s)", self)
         count_label.setObjectName("DocumentChecklistSlotCount")
@@ -1774,6 +1810,8 @@ class PermitDocumentFileCard(QFrame):
         file_name: str,
         extension_label: str,
         meta_text: str,
+        version_text: str,
+        review_status: str,
         icon: QIcon | None,
         parent: QWidget | None = None,
     ) -> None:
@@ -1781,7 +1819,8 @@ class PermitDocumentFileCard(QFrame):
         self.setObjectName("PermitDocumentFileCard")
         self.setProperty("selected", "false")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(78)
+        self.setFixedHeight(86)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
@@ -1803,12 +1842,18 @@ class PermitDocumentFileCard(QFrame):
 
         center_layout = QVBoxLayout()
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(4)
+        center_layout.setSpacing(2)
 
         title_label = QLabel(str(file_name or "").strip() or "Unnamed File", self)
         title_label.setObjectName("PermitDocumentFileTitle")
         title_label.setWordWrap(False)
         center_layout.addWidget(title_label, 0)
+
+        version_label = QLabel(str(version_text or "").strip(), self)
+        version_label.setObjectName("PermitDocumentFileMeta")
+        version_label.setProperty("versionMeta", "true")
+        version_label.setWordWrap(False)
+        center_layout.addWidget(version_label, 0)
 
         meta_label = QLabel(str(meta_text or "").strip(), self)
         meta_label.setObjectName("PermitDocumentFileMeta")
@@ -1817,11 +1862,24 @@ class PermitDocumentFileCard(QFrame):
 
         layout.addLayout(center_layout, 1)
 
+        badges_layout = QVBoxLayout()
+        badges_layout.setContentsMargins(0, 0, 0, 0)
+        badges_layout.setSpacing(4)
+        badges_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
         extension_badge = QLabel(str(extension_label or "FILE").strip() or "FILE", self)
         extension_badge.setObjectName("PermitDocumentFileExt")
         extension_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         extension_badge.setMinimumWidth(52)
-        layout.addWidget(extension_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        badges_layout.addWidget(extension_badge, 0, Qt.AlignmentFlag.AlignRight)
+
+        review_badge = QLabel(normalize_document_review_status(review_status).title(), self)
+        review_badge.setObjectName("DocumentChecklistSlotBadge")
+        review_badge.setProperty("badgeRole", normalize_document_review_status(review_status))
+        review_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badges_layout.addWidget(review_badge, 0, Qt.AlignmentFlag.AlignRight)
+
+        layout.addLayout(badges_layout, 0)
 
 
 class TimelineEventBubble(QFrame):
@@ -2118,6 +2176,7 @@ class ErPermitSysWindow(FramelessWindow):
         self._document_file_icon_cache: dict[str, QIcon] = {}
         self._document_status_label: QLabel | None = None
         self._document_upload_button: QPushButton | None = None
+        self._document_new_cycle_button: QPushButton | None = None
         self._document_open_folder_button: QPushButton | None = None
         self._document_open_file_button: QPushButton | None = None
         self._document_remove_file_button: QPushButton | None = None
@@ -2949,18 +3008,33 @@ class ErPermitSysWindow(FramelessWindow):
         blur_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._permit_workspace_blur_overlay = blur_overlay
 
-        workspace_focus_region = QFrame(workspace_content_host)
+        summary_width_host = QWidget(workspace_content_host)
+        summary_width_layout = QHBoxLayout(summary_width_host)
+        summary_width_layout.setContentsMargins(0, 0, 0, 0)
+        summary_width_layout.setSpacing(0)
+
+        summary_grid_host = QWidget(summary_width_host)
+        summary_grid_host.setObjectName("PermitWorkspaceSummaryGrid")
+        summary_grid_layout = QGridLayout(summary_grid_host)
+        summary_grid_layout.setContentsMargins(2, 2, 2, 2)
+        summary_grid_layout.setHorizontalSpacing(12)
+        summary_grid_layout.setVerticalSpacing(12)
+
+        workspace_lower_width_host = QWidget(workspace_content_host)
+        workspace_lower_width_layout = QHBoxLayout(workspace_lower_width_host)
+        workspace_lower_width_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_lower_width_layout.setSpacing(0)
+
+        workspace_lower_content_host = QWidget(workspace_lower_width_host)
+        workspace_lower_content_layout = QVBoxLayout(workspace_lower_content_host)
+        workspace_lower_content_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_lower_content_layout.setSpacing(10)
+
+        workspace_focus_region = QFrame(workspace_lower_content_host)
         workspace_focus_region.setObjectName("PermitWorkspaceFocusRegion")
         workspace_focus_layout = QVBoxLayout(workspace_focus_region)
         workspace_focus_layout.setContentsMargins(10, 10, 10, 10)
         workspace_focus_layout.setSpacing(8)
-
-        summary_grid_host = QFrame(workspace_focus_region)
-        summary_grid_host.setObjectName("PermitWorkspaceSummaryGrid")
-        summary_grid_layout = QGridLayout(summary_grid_host)
-        summary_grid_layout.setContentsMargins(0, 0, 0, 0)
-        summary_grid_layout.setHorizontalSpacing(8)
-        summary_grid_layout.setVerticalSpacing(8)
 
         def create_workspace_info_cell(
             *,
@@ -2972,8 +3046,8 @@ class ErPermitSysWindow(FramelessWindow):
             cell = QFrame(summary_grid_host)
             cell.setObjectName("PermitWorkspaceInfoCell")
             cell_layout = QVBoxLayout(cell)
-            cell_layout.setContentsMargins(10, 8, 10, 8)
-            cell_layout.setSpacing(2)
+            cell_layout.setContentsMargins(12, 10, 12, 10)
+            cell_layout.setSpacing(3)
 
             label = QLabel(label_text, cell)
             label.setObjectName("PermitWorkspaceInfoLabel")
@@ -2997,7 +3071,10 @@ class ErPermitSysWindow(FramelessWindow):
 
         for column in range(3):
             summary_grid_layout.setColumnStretch(column, 1)
-        workspace_focus_layout.addWidget(summary_grid_host)
+        summary_width_layout.addStretch(5)
+        summary_width_layout.addWidget(summary_grid_host, 90)
+        summary_width_layout.addStretch(5)
+        workspace_content_layout.addWidget(summary_width_host, 0)
 
         top_actions = QHBoxLayout()
         top_actions.setContentsMargins(0, 0, 0, 0)
@@ -3032,12 +3109,14 @@ class ErPermitSysWindow(FramelessWindow):
         next_action_title = QLabel("Next Action", next_action_card)
         next_action_title.setObjectName("PermitDocumentsTitle")
         next_action_title.setProperty("nextAction", "true")
+        next_action_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         next_action_layout.addWidget(next_action_title)
 
         self._next_action_label = QLabel("No next action set.", next_action_card)
         self._next_action_label.setObjectName("PermitDocumentStatus")
         self._next_action_label.setProperty("nextAction", "true")
         self._next_action_label.setWordWrap(True)
+        self._next_action_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         next_action_layout.addWidget(self._next_action_label)
         workspace_focus_layout.addWidget(next_action_card)
 
@@ -3103,9 +3182,9 @@ class ErPermitSysWindow(FramelessWindow):
         timeline_layout.addWidget(timeline_scroll, 1)
         workspace_focus_layout.addWidget(timeline_card, 0)
 
-        workspace_content_layout.addWidget(workspace_focus_region, 0)
+        workspace_lower_content_layout.addWidget(workspace_focus_region, 0)
 
-        docs_card = QFrame(workspace_content_host)
+        docs_card = QFrame(workspace_lower_content_host)
         docs_card.setObjectName("PermitDocumentsSection")
         docs_layout = QVBoxLayout(docs_card)
         docs_layout.setContentsMargins(12, 10, 12, 10)
@@ -3118,10 +3197,19 @@ class ErPermitSysWindow(FramelessWindow):
         docs_title.setObjectName("PermitDocumentsTitle")
         docs_title_row.addWidget(docs_title, 0)
         docs_title_row.addStretch(1)
+
+        docs_title_actions = QVBoxLayout()
+        docs_title_actions.setContentsMargins(0, 0, 0, 0)
+        docs_title_actions.setSpacing(6)
+
+        template_actions_row = QHBoxLayout()
+        template_actions_row.setContentsMargins(0, 0, 0, 0)
+        template_actions_row.setSpacing(8)
+
         template_apply_combo = QComboBox(docs_card)
         template_apply_combo.setObjectName("PermitFormCombo")
         template_apply_combo.setMinimumWidth(220)
-        docs_title_row.addWidget(
+        template_actions_row.addWidget(
             template_apply_combo,
             0,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -3131,12 +3219,15 @@ class ErPermitSysWindow(FramelessWindow):
         template_apply_button = QPushButton("Select", docs_card)
         template_apply_button.setObjectName("TrackerPanelActionButton")
         template_apply_button.clicked.connect(self._apply_selected_document_template_to_permit)
-        docs_title_row.addWidget(
+        template_actions_row.addWidget(
             template_apply_button,
             0,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         )
         self._document_template_apply_button = template_apply_button
+        docs_title_actions.addLayout(template_actions_row)
+
+        docs_title_row.addLayout(docs_title_actions, 0)
         docs_layout.addLayout(docs_title_row, 0)
 
         self._document_status_label = QLabel("Select a permit to manage documents.", docs_card)
@@ -3145,12 +3236,60 @@ class ErPermitSysWindow(FramelessWindow):
         docs_layout.addWidget(self._document_status_label)
 
         docs_hint = QLabel(
-            "Select a checklist slot, then upload files and mark the slot accepted/rejected.",
+            "Each slot tracks version cycles. Select a file to mark it, or leave no file selected to mark the entire slot folder.",
             docs_card,
         )
         docs_hint.setObjectName("TrackerPanelHint")
         docs_hint.setWordWrap(True)
         docs_layout.addWidget(docs_hint, 0)
+
+        docs_slot_tools_row = QHBoxLayout()
+        docs_slot_tools_row.setContentsMargins(0, 0, 0, 0)
+        docs_slot_tools_row.setSpacing(8)
+
+        self._document_open_folder_button = QPushButton("Open Folder", docs_card)
+        self._document_open_folder_button.setObjectName("TrackerPanelActionButton")
+        self._document_open_folder_button.clicked.connect(self._open_selected_slot_folder)
+        docs_slot_tools_row.addWidget(
+            self._document_open_folder_button,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        self._document_new_cycle_button = QPushButton("New Cycle", docs_card)
+        self._document_new_cycle_button.setObjectName("TrackerPanelActionButton")
+        self._document_new_cycle_button.clicked.connect(self._start_selected_slot_new_cycle)
+        docs_slot_tools_row.addWidget(
+            self._document_new_cycle_button,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        docs_slot_tools_row.addStretch(1)
+
+        self._document_mark_accepted_button = QPushButton("Mark Accepted", docs_card)
+        self._document_mark_accepted_button.setObjectName("TrackerPanelActionButton")
+        self._document_mark_accepted_button.clicked.connect(
+            lambda: self._mark_selected_slot_status("accepted")
+        )
+        docs_slot_tools_row.addWidget(
+            self._document_mark_accepted_button,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        self._document_mark_rejected_button = QPushButton("Mark Rejected", docs_card)
+        self._document_mark_rejected_button.setObjectName("TrackerPanelActionButton")
+        self._document_mark_rejected_button.clicked.connect(
+            lambda: self._mark_selected_slot_status("rejected")
+        )
+        docs_slot_tools_row.addWidget(
+            self._document_mark_rejected_button,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+
+        docs_layout.addLayout(docs_slot_tools_row, 0)
 
         docs_headers = QHBoxLayout()
         docs_headers.setContentsMargins(2, 0, 2, 0)
@@ -3158,7 +3297,7 @@ class ErPermitSysWindow(FramelessWindow):
         slots_header = QLabel("Checklist Slots", docs_card)
         slots_header.setObjectName("TrackerPanelSubsectionTitle")
         docs_headers.addWidget(slots_header, 1)
-        files_header = QLabel("Files in Selected Slot", docs_card)
+        files_header = QLabel("Files in Active Cycle", docs_card)
         files_header.setObjectName("TrackerPanelSubsectionTitle")
         docs_headers.addWidget(files_header, 1)
         docs_layout.addLayout(docs_headers)
@@ -3174,6 +3313,7 @@ class ErPermitSysWindow(FramelessWindow):
 
         self._document_file_list_widget = QListWidget(docs_card)
         self._document_file_list_widget.setObjectName("PermitDocumentList")
+        self._document_file_list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self._document_file_list_widget.itemSelectionChanged.connect(self._on_document_file_selection_changed)
         self._document_file_list_widget.itemDoubleClicked.connect(self._open_selected_document)
         docs_lists_row.addWidget(self._document_file_list_widget, 1)
@@ -3189,42 +3329,36 @@ class ErPermitSysWindow(FramelessWindow):
         self._document_upload_button.clicked.connect(self._upload_documents_to_slot)
         docs_actions.addWidget(self._document_upload_button)
 
-        self._document_open_folder_button = QPushButton("Open Folder", docs_card)
-        self._document_open_folder_button.setObjectName("TrackerPanelActionButton")
-        self._document_open_folder_button.clicked.connect(self._open_selected_slot_folder)
-        docs_actions.addWidget(self._document_open_folder_button)
+        docs_actions.addStretch(1)
 
         self._document_open_file_button = QPushButton("Open File", docs_card)
         self._document_open_file_button.setObjectName("TrackerPanelActionButton")
         self._document_open_file_button.clicked.connect(self._open_selected_document)
-        docs_actions.addWidget(self._document_open_file_button)
+        docs_actions.addWidget(
+            self._document_open_file_button,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
 
         self._document_remove_file_button = QPushButton("Remove File", docs_card)
         self._document_remove_file_button.setObjectName("PermitFormDangerButton")
+        self._document_remove_file_button.setProperty("adminHeaderDanger", "true")
         self._document_remove_file_button.clicked.connect(self._remove_selected_document)
-        docs_actions.addWidget(self._document_remove_file_button)
-
-        self._document_mark_accepted_button = QPushButton("Mark Accepted", docs_card)
-        self._document_mark_accepted_button.setObjectName("TrackerPanelActionButton")
-        self._document_mark_accepted_button.clicked.connect(
-            lambda: self._mark_selected_slot_status("accepted")
+        docs_actions.addWidget(
+            self._document_remove_file_button,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         )
-        docs_actions.addWidget(self._document_mark_accepted_button)
-
-        self._document_mark_rejected_button = QPushButton("Mark Rejected", docs_card)
-        self._document_mark_rejected_button.setObjectName("TrackerPanelActionButton")
-        self._document_mark_rejected_button.clicked.connect(
-            lambda: self._mark_selected_slot_status("rejected")
-        )
-        docs_actions.addWidget(self._document_mark_rejected_button)
-
-        docs_actions.addStretch(1)
         docs_layout.addLayout(docs_actions)
 
-        workspace_content_layout.addWidget(docs_card, 1)
-        workspace_width_layout.addStretch(15)
-        workspace_width_layout.addWidget(workspace_content_host, 70)
-        workspace_width_layout.addStretch(15)
+        workspace_lower_content_layout.addWidget(docs_card, 1)
+        workspace_lower_width_layout.addStretch(1)
+        workspace_lower_width_layout.addWidget(workspace_lower_content_host, 6)
+        workspace_lower_width_layout.addStretch(1)
+        workspace_content_layout.addWidget(workspace_lower_width_host, 1)
+        workspace_width_layout.addStretch(1)
+        workspace_width_layout.addWidget(workspace_content_host, 6)
+        workspace_width_layout.addStretch(1)
         right_layout.addWidget(workspace_width_host, 1)
 
         panels_shell_layout.addWidget(right_panel, 2)
@@ -9123,13 +9257,11 @@ class ErPermitSysWindow(FramelessWindow):
         ensure_default_document_structure(permit)
         refresh_slot_status_from_documents(permit)
         count = 0
-        file_counts = document_file_count_by_slot(permit)
         for slot in permit.document_slots:
             if not slot.required:
                 continue
-            files_in_slot = file_counts.get(slot.slot_id, 0)
             status = normalize_slot_status(slot.status)
-            if files_in_slot <= 0 and status == "missing":
+            if status in {"missing", "rejected", "superseded"}:
                 count += 1
         return count
 
@@ -10098,6 +10230,107 @@ class ErPermitSysWindow(FramelessWindow):
         permit.document_folders.append(created)
         return created
 
+    def _slot_active_cycle(self, slot: PermitDocumentSlot) -> int:
+        return self._safe_positive_int(slot.active_cycle, default=1)
+
+    def _safe_positive_int(self, value: object, *, default: int = 1) -> int:
+        try:
+            parsed = int(value)  # type: ignore[arg-type]
+        except Exception:
+            parsed = int(default)
+        return max(1, parsed)
+
+    def _documents_for_slot(
+        self,
+        permit: PermitRecord,
+        slot: PermitDocumentSlot,
+        *,
+        active_cycle_only: bool,
+    ) -> list[PermitDocumentRecord]:
+        folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
+        if not folder_id:
+            return []
+        active_cycle = self._slot_active_cycle(slot)
+        rows: list[PermitDocumentRecord] = []
+        for record in permit.documents:
+            if normalize_slot_id(record.folder_id) != folder_id:
+                continue
+            record_cycle = self._safe_positive_int(record.cycle_index, default=1)
+            if active_cycle_only and record_cycle != active_cycle:
+                continue
+            rows.append(record)
+        return rows
+
+    def _next_slot_revision_index(
+        self,
+        permit: PermitRecord,
+        slot: PermitDocumentSlot,
+        *,
+        cycle_index: int,
+    ) -> int:
+        target_cycle = self._safe_positive_int(cycle_index, default=1)
+        max_revision = 0
+        for record in self._documents_for_slot(permit, slot, active_cycle_only=False):
+            if self._safe_positive_int(record.cycle_index, default=1) != target_cycle:
+                continue
+            max_revision = max(
+                max_revision,
+                self._safe_positive_int(record.revision_index, default=1),
+            )
+        return max_revision + 1
+
+    def _cycle_folder_segment(self, cycle_index: int) -> str:
+        return f"cycle-{self._safe_positive_int(cycle_index, default=1):02d}"
+
+    def _cycle_label(self, cycle_index: int) -> str:
+        return f"Cycle {self._safe_positive_int(cycle_index, default=1):02d}"
+
+    def _active_cycle_status_counts_for_slot(
+        self,
+        permit: PermitRecord,
+        slot: PermitDocumentSlot,
+    ) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in self._documents_for_slot(permit, slot, active_cycle_only=True):
+            review_status = normalize_document_review_status(record.review_status)
+            counts[review_status] = counts.get(review_status, 0) + 1
+        return counts
+
+    def _add_centered_list_empty_state(
+        self,
+        widget: QListWidget,
+        message: str,
+    ) -> None:
+        text = str(message or "").strip()
+        item = QListWidgetItem()
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        widget.addItem(item)
+
+        label = QLabel(text, widget)
+        label.setObjectName("TrackerPanelEmptyState")
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setMargin(8)
+        widget.setItemWidget(item, label)
+
+        def sync_empty_state_size() -> None:
+            try:
+                viewport = widget.viewport()
+                if viewport is None:
+                    return
+                if widget.itemWidget(item) is not label:
+                    return
+                viewport_size = viewport.size()
+                target_width = max(120, viewport_size.width() - 2)
+                target_height = max(108, viewport_size.height() - 2)
+                item.setSizeHint(QSize(target_width, target_height))
+                label.setMinimumHeight(max(96, target_height - 4))
+            except RuntimeError:
+                return
+
+        sync_empty_state_size()
+        QTimer.singleShot(0, sync_empty_state_size)
+
     def _refresh_document_slots(self, permit: PermitRecord | None) -> None:
         slot_widget = self._document_slot_list_widget
         file_widget = self._document_file_list_widget
@@ -10113,15 +10346,13 @@ class ErPermitSysWindow(FramelessWindow):
 
         if permit is None:
             self._selected_document_slot_id = ""
-            slot_widget.addItem(
-                QListWidgetItem(
-                    "No permit selected.\nChoose a permit to view its checklist slots."
-                )
+            self._add_centered_list_empty_state(
+                slot_widget,
+                "No permit selected.\nChoose a permit to view its checklist slots.",
             )
-            file_widget.addItem(
-                QListWidgetItem(
-                    "No permit selected.\nChoose a permit, then select a slot to view files."
-                )
+            self._add_centered_list_empty_state(
+                file_widget,
+                "No permit selected.\nChoose a permit, then select a slot to view files.",
             )
             slot_widget.blockSignals(False)
             file_widget.blockSignals(False)
@@ -10138,6 +10369,7 @@ class ErPermitSysWindow(FramelessWindow):
         for slot in permit.document_slots:
             status = normalize_slot_status(slot.status)
             count = file_counts.get(slot.slot_id, 0)
+            status_counts = self._active_cycle_status_counts_for_slot(permit, slot)
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, slot.slot_id)
             slot_widget.addItem(item)
@@ -10147,6 +10379,7 @@ class ErPermitSysWindow(FramelessWindow):
                 required=bool(slot.required),
                 status=status,
                 file_count=count,
+                status_counts=status_counts,
                 parent=slot_widget,
             )
             item.setSizeHint(self._list_item_size_hint_for_card(card))
@@ -10154,15 +10387,13 @@ class ErPermitSysWindow(FramelessWindow):
             self._document_slot_cards[slot.slot_id] = card
 
         if not permit.document_slots:
-            slot_widget.addItem(
-                QListWidgetItem(
-                    "No checklist slots are configured for this permit."
-                )
+            self._add_centered_list_empty_state(
+                slot_widget,
+                "No checklist slots are configured for this permit.",
             )
-            file_widget.addItem(
-                QListWidgetItem(
-                    "No checklist slots are configured for this permit."
-                )
+            self._add_centered_list_empty_state(
+                file_widget,
+                "No checklist slots are configured for this permit.",
             )
             self._selected_document_slot_id = ""
             slot_widget.blockSignals(False)
@@ -10229,15 +10460,15 @@ class ErPermitSysWindow(FramelessWindow):
         if file_widget is None:
             return
 
+        previous_selected_document_id = str(self._selected_document_id or "").strip()
         file_widget.blockSignals(True)
         file_widget.clear()
         self._selected_document_id = ""
 
         if permit is None:
-            file_widget.addItem(
-                QListWidgetItem(
-                    "No permit selected.\nChoose a permit, then select a checklist slot."
-                )
+            self._add_centered_list_empty_state(
+                file_widget,
+                "No permit selected.\nChoose a permit, then select a checklist slot.",
             )
             file_widget.blockSignals(False)
             self._sync_document_action_buttons(enabled=False)
@@ -10245,33 +10476,38 @@ class ErPermitSysWindow(FramelessWindow):
 
         slot = self._slot_by_id(permit, self._selected_document_slot_id)
         if slot is None:
-            file_widget.addItem(
-                QListWidgetItem(
-                    "Select a checklist slot to view or upload documents."
-                )
+            self._add_centered_list_empty_state(
+                file_widget,
+                "Select a checklist slot to view or upload documents.",
             )
             file_widget.blockSignals(False)
             self._sync_document_action_buttons(enabled=False)
             return
 
-        folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
-        documents = [
-            record for record in permit.documents if normalize_slot_id(record.folder_id) == folder_id
-        ]
+        active_cycle = self._slot_active_cycle(slot)
+        documents = self._documents_for_slot(
+            permit,
+            slot,
+            active_cycle_only=True,
+        )
         documents.sort(
-            key=lambda row: (row.imported_at, row.original_name, row.document_id),
+            key=lambda row: (
+                self._safe_positive_int(row.revision_index, default=1),
+                row.imported_at,
+                row.original_name,
+                row.document_id,
+            ),
             reverse=True,
         )
 
         if not documents:
-            file_widget.addItem(
-                QListWidgetItem(
-                    "No files in this slot yet.\nUse Upload to add documents to this checklist item."
-                )
+            self._add_centered_list_empty_state(
+                file_widget,
+                "No files in the active cycle yet.\nUse Upload to add documents to this checklist item.",
             )
             if self._document_status_label is not None:
                 self._document_status_label.setText(
-                    f"{slot.label}: {normalize_slot_status(slot.status).title()} | 0 files | Upload to continue"
+                    f"{slot.label} | {self._cycle_label(active_cycle)} | {normalize_slot_status(slot.status).title()} | 0 files"
                 )
             file_widget.blockSignals(False)
             self._sync_document_action_buttons(enabled=True, has_file=False)
@@ -10288,6 +10524,13 @@ class ErPermitSysWindow(FramelessWindow):
             )
             extension = Path(display_name).suffix.lstrip(".").upper() or "FILE"
             icon = self._document_file_icon_for_record(document, display_name)
+            review_status = normalize_document_review_status(document.review_status)
+            document_cycle = self._safe_positive_int(document.cycle_index, default=1)
+            document_revision = self._safe_positive_int(document.revision_index, default=1)
+            version_text = (
+                f"{self._cycle_label(document_cycle)}  "
+                f"Rev {document_revision:02d}"
+            )
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, document.document_id)
             file_widget.addItem(item)
@@ -10295,23 +10538,32 @@ class ErPermitSysWindow(FramelessWindow):
                 file_name=display_name,
                 extension_label=extension,
                 meta_text=f"{size_text} | {date_text}",
+                version_text=version_text,
+                review_status=review_status,
                 icon=icon,
                 parent=file_widget,
             )
             file_widget.setItemWidget(item, card)
             item.setSizeHint(self._list_item_size_hint_for_card(card))
 
-        self._selected_document_id = documents[0].document_id
-        self._select_document_file_item(self._selected_document_id)
+        selected_document_id = previous_selected_document_id
+        if not any(row.document_id == selected_document_id for row in documents):
+            selected_document_id = ""
+        self._selected_document_id = selected_document_id
+        if self._selected_document_id:
+            self._select_document_file_item(self._selected_document_id)
 
         if self._document_status_label is not None:
             self._document_status_label.setText(
-                f"{slot.label}: {normalize_slot_status(slot.status).title()} | {len(documents)} files"
+                f"{slot.label} | {self._cycle_label(active_cycle)} | {normalize_slot_status(slot.status).title()} | {len(documents)} files"
             )
 
         file_widget.blockSignals(False)
         self._set_admin_list_card_selection(file_widget)
-        self._sync_document_action_buttons(enabled=True, has_file=True)
+        self._sync_document_action_buttons(
+            enabled=True,
+            has_file=bool(self._selected_document_id),
+        )
 
     def _select_document_file_item(self, document_id: str) -> None:
         widget = self._document_file_list_widget
@@ -10326,16 +10578,21 @@ class ErPermitSysWindow(FramelessWindow):
             return
 
     def _sync_document_action_buttons(self, *, enabled: bool, has_file: bool = False) -> None:
-        for control in (self._document_upload_button, self._document_open_folder_button):
+        for control in (
+            self._document_upload_button,
+            self._document_open_folder_button,
+        ):
             if control is not None:
                 control.setEnabled(enabled)
+        if self._document_new_cycle_button is not None:
+            self._document_new_cycle_button.setEnabled(enabled and has_file)
         if self._document_open_file_button is not None:
             self._document_open_file_button.setEnabled(enabled and has_file)
         if self._document_remove_file_button is not None:
             self._document_remove_file_button.setEnabled(enabled and has_file)
         for control in (self._document_mark_accepted_button, self._document_mark_rejected_button):
             if control is not None:
-                control.setEnabled(enabled and has_file)
+                control.setEnabled(enabled)
 
     def _refresh_selected_permit_view(self) -> None:
         permit = self._selected_permit()
@@ -10947,6 +11204,8 @@ class ErPermitSysWindow(FramelessWindow):
         if not file_paths:
             return
 
+        active_cycle = self._slot_active_cycle(slot)
+        cycle_segment = self._cycle_folder_segment(active_cycle)
         failures: list[str] = []
         imported_count = 0
         for raw_path in file_paths:
@@ -10956,15 +11215,25 @@ class ErPermitSysWindow(FramelessWindow):
                     permit=permit,
                     folder=folder,
                     source_path=source_path,
+                    cycle_folder=cycle_segment,
                 )
             except Exception as exc:
                 failures.append(f"{source_path.name}: {exc}")
                 continue
+            document.folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
+            document.slot_id = slot.slot_id
+            document.cycle_index = active_cycle
+            document.revision_index = self._next_slot_revision_index(
+                permit,
+                slot,
+                cycle_index=active_cycle,
+            )
+            document.review_status = "uploaded"
+            document.reviewed_at = ""
+            document.review_note = ""
             permit.documents.append(document)
             imported_count += 1
-
-        if imported_count > 0 and normalize_slot_status(slot.status) == "missing":
-            slot.status = "uploaded"
+            self._selected_document_id = document.document_id
 
         refresh_slot_status_from_documents(permit)
         self._persist_tracker_data()
@@ -10993,6 +11262,57 @@ class ErPermitSysWindow(FramelessWindow):
             self._show_warning_dialog("Folder Error", f"Could not open folder.\n\n{exc}")
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder_path)))
+
+    def _start_selected_slot_new_cycle(self) -> None:
+        permit = self._selected_permit()
+        if permit is None:
+            return
+        slot = self._slot_by_id(permit, self._selected_document_slot_id)
+        if slot is None:
+            self._show_info_dialog("Select Slot", "Select a checklist slot first.")
+            return
+
+        current_cycle = self._slot_active_cycle(slot)
+        existing_cycle_docs = self._documents_for_slot(
+            permit,
+            slot,
+            active_cycle_only=True,
+        )
+        if not existing_cycle_docs:
+            self._show_info_dialog(
+                "Cycle Already Empty",
+                "The active cycle has no files yet. Upload files to this cycle first.",
+            )
+            return
+
+        next_cycle = current_cycle + 1
+        if not self._confirm_dialog(
+            "Start New Cycle",
+            (
+                f"Start {self._cycle_label(next_cycle)} for '{slot.label or slot.slot_id}'?\n\n"
+                "This keeps existing files in previous cycles and sets this slot back to Missing "
+                "until new files are uploaded."
+            ),
+            confirm_text="Start New Cycle",
+            cancel_text="Cancel",
+        ):
+            return
+
+        slot.active_cycle = next_cycle
+        slot.status = "missing"
+        permit.events.append(
+            PermitEventRecord(
+                event_id=uuid4().hex,
+                event_type="note",
+                event_date=_today_iso(),
+                summary=f"Started {self._cycle_label(next_cycle)} for {slot.label or slot.slot_id}",
+                detail="Document resubmission cycle advanced.",
+            )
+        )
+        refresh_slot_status_from_documents(permit)
+        self._selected_document_id = ""
+        self._persist_tracker_data()
+        self._refresh_selected_permit_view()
 
     def _open_selected_document(self, _item: QListWidgetItem | None = None) -> None:
         permit = self._selected_permit()
@@ -11050,15 +11370,77 @@ class ErPermitSysWindow(FramelessWindow):
         slot = self._slot_by_id(permit, self._selected_document_slot_id)
         if slot is None:
             return
-        folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
-        has_files = any(normalize_slot_id(document.folder_id) == folder_id for document in permit.documents)
-        if not has_files:
+
+        target_status = normalize_document_review_status(status)
+        if target_status not in {"accepted", "rejected"}:
+            return
+
+        slot_folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
+        slot_documents = [
+            record
+            for record in permit.documents
+            if normalize_slot_id(record.folder_id) == slot_folder_id
+        ]
+        if not slot_documents:
             self._show_info_dialog(
                 "No Files",
-                "Upload at least one file in this slot before marking accepted or rejected.",
+                "This checklist slot has no files to mark yet.",
             )
             return
-        slot.status = normalize_slot_status(status)
+
+        widget = self._document_file_list_widget
+        if widget is not None:
+            current_item = widget.currentItem()
+            if current_item is not None:
+                self._selected_document_id = str(
+                    current_item.data(Qt.ItemDataRole.UserRole) or ""
+                ).strip()
+
+        document = self._document_by_id(permit, self._selected_document_id)
+        use_bulk_slot_mark = (
+            document is None
+            or normalize_slot_id(document.folder_id) != slot_folder_id
+        )
+
+        if use_bulk_slot_mark:
+            action_text = "Accepted" if target_status == "accepted" else "Rejected"
+            if not self._confirm_dialog(
+                f"Mark {action_text}",
+                (
+                    f"No file is selected.\n\n"
+                    f"Mark all files in '{slot.label or slot.slot_id}' as {action_text.lower()}?\n"
+                    "This will update the status of every file in this folder."
+                ),
+                confirm_text=f"Mark All {action_text}",
+                cancel_text="Cancel",
+                danger=(target_status == "rejected"),
+            ):
+                return
+            changed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            for record in slot_documents:
+                record.review_status = target_status
+                record.reviewed_at = changed_at
+                record.review_note = ""
+        else:
+            document_cycle = self._safe_positive_int(document.cycle_index, default=1)
+            document.review_status = target_status
+            document.reviewed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            document.review_note = ""
+
+            if target_status == "accepted":
+                for record in permit.documents:
+                    if record.document_id == document.document_id:
+                        continue
+                    if normalize_slot_id(record.folder_id) != slot_folder_id:
+                        continue
+                    if self._safe_positive_int(record.cycle_index, default=1) != document_cycle:
+                        continue
+                    peer_status = normalize_document_review_status(record.review_status)
+                    if peer_status in {"uploaded", "accepted"}:
+                        record.review_status = "superseded"
+                        record.reviewed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        refresh_slot_status_from_documents(permit)
         self._persist_tracker_data()
         self._refresh_selected_permit_view()
 

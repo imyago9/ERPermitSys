@@ -38,6 +38,7 @@ class PermitDocumentStore(Protocol):
         permit: PermitRecord,
         folder: PermitDocumentFolder,
         source_path: Path | str,
+        cycle_folder: str = "",
     ) -> PermitDocumentRecord:
         raise NotImplementedError
 
@@ -105,12 +106,16 @@ class LocalPermitDocumentStore:
         permit: PermitRecord,
         folder: PermitDocumentFolder,
         source_path: Path | str,
+        cycle_folder: str = "",
     ) -> PermitDocumentRecord:
         source_file = Path(source_path).expanduser()
         if not source_file.exists() or not source_file.is_file():
             raise FileNotFoundError(f"File not found: {source_file}")
 
         destination_dir = self.folder_path(permit, folder)
+        cycle_segment = _safe_segment(cycle_folder)
+        if cycle_segment:
+            destination_dir = destination_dir / cycle_segment
         destination_dir.mkdir(parents=True, exist_ok=True)
 
         requested_name = _safe_file_name(source_file.name)
@@ -247,8 +252,9 @@ class SupabasePermitDocumentStore:
         permit: PermitRecord,
         folder: PermitDocumentFolder,
         source_path: Path | str,
+        cycle_folder: str = "",
     ) -> PermitDocumentRecord:
-        _ = (permit, folder, source_path)
+        _ = (permit, folder, source_path, cycle_folder)
         raise NotImplementedError("Supabase document storage is not implemented yet.")
 
     def delete_document_file(self, document: PermitDocumentRecord) -> None:

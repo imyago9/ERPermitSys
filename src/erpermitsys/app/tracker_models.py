@@ -50,9 +50,16 @@ _SLOT_STATUSES: tuple[str, ...] = (
     "rejected",
     "superseded",
 )
+_DOCUMENT_REVIEW_STATUSES: tuple[str, ...] = (
+    "uploaded",
+    "accepted",
+    "rejected",
+    "superseded",
+)
 
 _PARCEL_NORMALIZE_PATTERN = re.compile(r"[^a-z0-9]+")
 _SLOT_ID_NORMALIZE_PATTERN = re.compile(r"[^a-z0-9_]+")
+_CYCLE_SEGMENT_PATTERN = re.compile(r"(?:^|[\\\\/])cycle[-_ ]?(\\d+)(?:$|[\\\\/])", re.IGNORECASE)
 _HEX_COLOR_PATTERN = re.compile(r"^#?([0-9a-fA-F]{6})$")
 _SHORT_HEX_COLOR_PATTERN = re.compile(r"^#?([0-9a-fA-F]{3})$")
 
@@ -71,6 +78,14 @@ def _as_non_negative_int(value: Any) -> int:
     except Exception:
         return 0
     return max(0, parsed)
+
+
+def _as_positive_int(value: Any, *, default: int = 1) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        return max(1, int(default))
+    return max(1, parsed)
 
 
 def _as_bool(value: Any) -> bool:
@@ -170,6 +185,15 @@ def normalize_slot_status(value: Any) -> str:
     return "missing"
 
 
+def normalize_document_review_status(value: Any) -> str:
+    normalized = _as_text(value).replace("-", "_").replace(" ", "_").casefold()
+    if normalized in _DOCUMENT_REVIEW_STATUSES:
+        return normalized
+    if normalized == "missing":
+        return "uploaded"
+    return "uploaded"
+
+
 def normalize_slot_id(value: Any) -> str:
     normalized = _as_text(value).replace("-", "_").replace(" ", "_").casefold()
     if not normalized:
@@ -177,6 +201,20 @@ def normalize_slot_id(value: Any) -> str:
     normalized = _SLOT_ID_NORMALIZE_PATTERN.sub("_", normalized)
     normalized = re.sub(r"_+", "_", normalized).strip("_")
     return normalized
+
+
+def _infer_cycle_index_from_relative_path(value: Any) -> int:
+    relative_path = _as_text(value)
+    if not relative_path:
+        return 1
+    match = _CYCLE_SEGMENT_PATTERN.search(relative_path)
+    if match is None:
+        return 1
+    try:
+        parsed = int(match.group(1))
+    except Exception:
+        return 1
+    return max(1, parsed)
 
 
 def _parse_iso_datetime(value: Any) -> datetime | None:
@@ -506,6 +544,12 @@ class PermitDocumentRecord:
     original_name: str
     stored_name: str
     relative_path: str
+    slot_id: str = ""
+    cycle_index: int = 1
+    revision_index: int = 1
+    review_status: str = "uploaded"
+    reviewed_at: str = ""
+    review_note: str = ""
     imported_at: str = ""
     byte_size: int = 0
     sha256: str = ""
@@ -526,6 +570,14 @@ class PermitDocumentRecord:
             original_name=_as_text(value.get("original_name")),
             stored_name=_as_text(value.get("stored_name")),
             relative_path=_as_text(value.get("relative_path")),
+            slot_id=normalize_slot_id(value.get("slot_id") or value.get("slot")) or _as_text(value.get("slot_id")),
+            cycle_index=_as_positive_int(
+                value.get("cycle_index") or value.get("cycle") or _infer_cycle_index_from_relative_path(value.get("relative_path"))
+            ),
+            revision_index=_as_positive_int(value.get("revision_index") or value.get("revision")),
+            review_status=normalize_document_review_status(value.get("review_status") or value.get("status")),
+            reviewed_at=_as_text(value.get("reviewed_at")),
+            review_note=_as_text(value.get("review_note") or value.get("review_notes") or value.get("review_detail")),
             imported_at=_as_text(value.get("imported_at")),
             byte_size=_as_non_negative_int(value.get("byte_size")),
             sha256=_as_text(value.get("sha256")),
@@ -538,6 +590,12 @@ class PermitDocumentRecord:
             "original_name": _as_text(self.original_name),
             "stored_name": _as_text(self.stored_name),
             "relative_path": _as_text(self.relative_path),
+            "slot_id": normalize_slot_id(self.slot_id) or _as_text(self.slot_id),
+            "cycle_index": _as_positive_int(self.cycle_index),
+            "revision_index": _as_positive_int(self.revision_index),
+            "review_status": normalize_document_review_status(self.review_status),
+            "reviewed_at": _as_text(self.reviewed_at),
+            "review_note": _as_text(self.review_note),
             "imported_at": _as_text(self.imported_at),
             "byte_size": _as_non_negative_int(self.byte_size),
             "sha256": _as_text(self.sha256),
@@ -611,6 +669,7 @@ class PermitDocumentSlot:
     required: bool
     status: str = "missing"
     folder_id: str = ""
+    active_cycle: int = 1
     notes: str = ""
 
     @classmethod
@@ -627,6 +686,7 @@ class PermitDocumentSlot:
             required=_as_bool(value.get("required")),
             status=normalize_slot_status(value.get("status")),
             folder_id=folder_id,
+            active_cycle=_as_positive_int(value.get("active_cycle") or value.get("cycle")),
             notes=_as_text(value.get("notes")),
         )
 
@@ -639,6 +699,7 @@ class PermitDocumentSlot:
             "required": bool(self.required),
             "status": normalize_slot_status(self.status),
             "folder_id": folder_id,
+            "active_cycle": _as_positive_int(self.active_cycle),
             "notes": _as_text(self.notes),
         }
 
@@ -939,12 +1000,93 @@ def ensure_default_document_structure(permit: PermitRecord) -> bool:
                 required=bool(slot.required),
                 status=status,
                 folder_id=folder_id,
+                active_cycle=_as_positive_int(slot.active_cycle),
                 notes=_as_text(slot.notes),
             )
         )
 
     if normalized_slots != permit.document_slots:
         permit.document_slots = normalized_slots
+        changed = True
+
+    slot_folder_to_slot_id: dict[str, str] = {}
+    for slot in permit.document_slots:
+        folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
+        if folder_id:
+            slot_folder_to_slot_id[folder_id] = slot.slot_id
+
+    max_revision_by_key: dict[tuple[str, int], int] = {}
+    normalized_documents: list[PermitDocumentRecord] = []
+    for document in sorted(
+        permit.documents,
+        key=lambda row: (
+            normalize_slot_id(row.folder_id),
+            _as_positive_int(row.cycle_index or _infer_cycle_index_from_relative_path(row.relative_path)),
+            row.imported_at,
+            row.document_id,
+        ),
+    ):
+        folder_id = normalize_slot_id(document.folder_id)
+        if not folder_id:
+            continue
+        slot_id = normalize_slot_id(document.slot_id) or slot_folder_to_slot_id.get(folder_id, "")
+        cycle_index = _as_positive_int(
+            document.cycle_index or _infer_cycle_index_from_relative_path(document.relative_path)
+        )
+        revision_key = (folder_id, cycle_index)
+        revision_index = _as_positive_int(document.revision_index, default=0)
+        next_revision = max_revision_by_key.get(revision_key, 0) + 1
+        if revision_index < next_revision:
+            revision_index = next_revision
+        max_revision_by_key[revision_key] = max(max_revision_by_key.get(revision_key, 0), revision_index)
+        normalized_documents.append(
+            PermitDocumentRecord(
+                document_id=_safe_uuid(document.document_id),
+                folder_id=folder_id,
+                original_name=_as_text(document.original_name),
+                stored_name=_as_text(document.stored_name),
+                relative_path=_as_text(document.relative_path),
+                slot_id=slot_id,
+                cycle_index=cycle_index,
+                revision_index=revision_index,
+                review_status=normalize_document_review_status(document.review_status),
+                reviewed_at=_as_text(document.reviewed_at),
+                review_note=_as_text(document.review_note),
+                imported_at=_as_text(document.imported_at),
+                byte_size=_as_non_negative_int(document.byte_size),
+                sha256=_as_text(document.sha256),
+            )
+        )
+
+    if normalized_documents != permit.documents:
+        permit.documents = normalized_documents
+        changed = True
+
+    max_cycle_by_folder: dict[str, int] = {}
+    for document in permit.documents:
+        folder_id = normalize_slot_id(document.folder_id)
+        if not folder_id:
+            continue
+        cycle_index = _as_positive_int(document.cycle_index)
+        max_cycle_by_folder[folder_id] = max(max_cycle_by_folder.get(folder_id, 0), cycle_index)
+
+    normalized_slots_with_cycle: list[PermitDocumentSlot] = []
+    for slot in permit.document_slots:
+        folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
+        derived_cycle = max(_as_positive_int(slot.active_cycle), max_cycle_by_folder.get(folder_id, 0), 1)
+        normalized_slot = PermitDocumentSlot(
+            slot_id=slot.slot_id,
+            label=slot.label,
+            required=bool(slot.required),
+            status=normalize_slot_status(slot.status),
+            folder_id=folder_id or slot.slot_id,
+            active_cycle=derived_cycle,
+            notes=_as_text(slot.notes),
+        )
+        normalized_slots_with_cycle.append(normalized_slot)
+
+    if normalized_slots_with_cycle != permit.document_slots:
+        permit.document_slots = normalized_slots_with_cycle
         changed = True
 
     expected_folders = build_document_folders_from_slots(permit.document_slots)
@@ -980,22 +1122,74 @@ def ensure_default_document_structure(permit: PermitRecord) -> bool:
 
 def refresh_slot_status_from_documents(permit: PermitRecord) -> bool:
     changed = False
-    counts_by_folder: dict[str, int] = {}
+    documents_by_folder: dict[str, list[PermitDocumentRecord]] = {}
+    max_cycle_by_folder: dict[str, int] = {}
     for document in permit.documents:
         folder_id = normalize_slot_id(document.folder_id)
         if not folder_id:
             continue
-        counts_by_folder[folder_id] = counts_by_folder.get(folder_id, 0) + 1
+
+        normalized_cycle = _as_positive_int(document.cycle_index or _infer_cycle_index_from_relative_path(document.relative_path))
+        normalized_revision = _as_positive_int(document.revision_index)
+        normalized_review_status = normalize_document_review_status(document.review_status)
+        if (
+            normalized_cycle != document.cycle_index
+            or normalized_revision != document.revision_index
+            or normalized_review_status != document.review_status
+        ):
+            document.cycle_index = normalized_cycle
+            document.revision_index = normalized_revision
+            document.review_status = normalized_review_status
+            changed = True
+
+        documents_by_folder.setdefault(folder_id, []).append(document)
+        max_cycle_by_folder[folder_id] = max(max_cycle_by_folder.get(folder_id, 0), normalized_cycle)
 
     for slot in permit.document_slots:
         folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
-        has_files = counts_by_folder.get(folder_id, 0) > 0
-        normalized_status = normalize_slot_status(slot.status)
-        if has_files and normalized_status == "missing":
-            slot.status = "uploaded"
+        if not folder_id:
+            continue
+
+        active_cycle = _as_positive_int(slot.active_cycle)
+        max_cycle = max_cycle_by_folder.get(folder_id, 0)
+        if max_cycle > active_cycle:
+            active_cycle = max_cycle
+            slot.active_cycle = active_cycle
             changed = True
-        elif not has_files and normalized_status != "missing":
-            slot.status = "missing"
+        elif slot.active_cycle != active_cycle:
+            slot.active_cycle = active_cycle
+            changed = True
+
+        slot_documents = documents_by_folder.get(folder_id, [])
+        normalized_status = normalize_slot_status(slot.status)
+        if not slot_documents:
+            target_status = "missing"
+        else:
+            active_documents = [
+                document
+                for document in slot_documents
+                if _as_positive_int(document.cycle_index) == active_cycle
+            ]
+            if not active_documents:
+                target_status = "superseded"
+            else:
+                active_statuses = {
+                    normalize_document_review_status(document.review_status)
+                    for document in active_documents
+                }
+                if "accepted" in active_statuses:
+                    target_status = "accepted"
+                elif "uploaded" in active_statuses:
+                    target_status = "uploaded"
+                elif "rejected" in active_statuses:
+                    target_status = "rejected"
+                elif "superseded" in active_statuses:
+                    target_status = "superseded"
+                else:
+                    target_status = "uploaded"
+
+        if normalized_status != target_status:
+            slot.status = target_status
             changed = True
         else:
             slot.status = normalized_status
@@ -1005,16 +1199,19 @@ def refresh_slot_status_from_documents(permit: PermitRecord) -> bool:
 
 def document_file_count_by_slot(permit: PermitRecord) -> dict[str, int]:
     counts: dict[str, int] = {}
-    folder_to_slot: dict[str, str] = {}
+    folder_meta: dict[str, tuple[str, int]] = {}
     for slot in permit.document_slots:
         folder_id = normalize_slot_id(slot.folder_id) or normalize_slot_id(slot.slot_id)
         if folder_id:
-            folder_to_slot[folder_id] = slot.slot_id
+            folder_meta[folder_id] = (slot.slot_id, _as_positive_int(slot.active_cycle))
             counts.setdefault(slot.slot_id, 0)
     for document in permit.documents:
         folder_id = normalize_slot_id(document.folder_id)
-        slot_id = folder_to_slot.get(folder_id)
-        if not slot_id:
+        meta = folder_meta.get(folder_id)
+        if meta is None:
+            continue
+        slot_id, active_cycle = meta
+        if _as_positive_int(document.cycle_index) != active_cycle:
             continue
         counts[slot_id] = counts.get(slot_id, 0) + 1
     return counts
