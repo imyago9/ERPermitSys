@@ -187,13 +187,15 @@ class WindowDocumentTemplatesMixin:
         form = QFrame(template_scroll)
         form.setObjectName("PermitFormCard")
         form.setProperty("adminForm", "true")
+        form.setMinimumWidth(560)
         form_layout = QVBoxLayout(form)
-        form_layout.setContentsMargins(14, 12, 14, 14)
-        form_layout.setSpacing(10)
+        form_layout.setContentsMargins(14, 14, 14, 14)
+        form_layout.setSpacing(11)
         self._template_form_widget = form
 
         header_bar = QFrame(form)
         header_bar.setObjectName("AdminHeaderBar")
+        header_bar.setMinimumHeight(48)
         header_row = QHBoxLayout(header_bar)
         header_row.setContentsMargins(10, 8, 10, 8)
         header_row.setSpacing(8)
@@ -209,6 +211,7 @@ class WindowDocumentTemplatesMixin:
         save_button.setObjectName("TrackerPanelActionButton")
         save_button.setProperty("adminPrimaryCta", "true")
         save_button.setMinimumHeight(32)
+        save_button.setMinimumWidth(122)
         save_button.clicked.connect(self._save_document_template)
         header_row.addWidget(save_button, 0)
         self._template_save_button = save_button
@@ -216,6 +219,7 @@ class WindowDocumentTemplatesMixin:
         default_button = QPushButton("Set as Default", form)
         default_button.setObjectName("TrackerPanelActionButton")
         default_button.setMinimumHeight(32)
+        default_button.setMinimumWidth(122)
         default_button.clicked.connect(self._set_template_as_default)
         header_row.addWidget(default_button, 0)
         self._template_set_default_button = default_button
@@ -223,6 +227,7 @@ class WindowDocumentTemplatesMixin:
         delete_button = QPushButton("Delete Template", form)
         delete_button.setObjectName("PermitFormDangerButton")
         delete_button.setMinimumHeight(32)
+        delete_button.setMinimumWidth(122)
         delete_button.clicked.connect(self._delete_document_template)
         header_row.addWidget(delete_button, 0)
         self._template_delete_button = delete_button
@@ -1025,6 +1030,22 @@ class WindowDocumentTemplatesMixin:
         notes = self._template_notes_input.text().strip() if self._template_notes_input is not None else ""
 
         existing = self._template_by_id(self._template_selected_id)
+        action_word = "Update" if existing is not None else "Create"
+        template_label = name or "(unnamed)"
+        slot_count = len(slots)
+        confirm_message = (
+            f"{action_word} template '{template_label}'?\n\n"
+            f"Permit Type: {_permit_type_label(permit_type)}\n"
+            f"Folder Count: {slot_count}"
+        )
+        if not self._confirm_dialog(
+            f"{action_word} Template",
+            confirm_message,
+            confirm_text=action_word,
+            cancel_text="Cancel",
+        ):
+            return
+
         if existing is None:
             record = DocumentChecklistTemplate(
                 template_id=uuid4().hex,

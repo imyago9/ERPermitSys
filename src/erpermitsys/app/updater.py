@@ -9,6 +9,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -149,7 +150,13 @@ class GitHubReleaseUpdater:
             info=info,
         )
 
-    def download_asset(self, *, asset: GitHubReleaseAsset, destination: Path) -> Path:
+    def download_asset(
+        self,
+        *,
+        asset: GitHubReleaseAsset,
+        destination: Path,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> Path:
         target = Path(destination).expanduser().resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -162,12 +169,33 @@ class GitHubReleaseUpdater:
         )
 
         with urlopen(request, timeout=self._timeout_seconds) as response:
+            total_bytes = 0
+            content_length = str(response.headers.get("Content-Length", "")).strip()
+            if content_length:
+                try:
+                    total_bytes = max(0, int(content_length))
+                except ValueError:
+                    total_bytes = 0
+            if total_bytes <= 0:
+                total_bytes = max(0, int(asset.size_bytes))
+            downloaded_bytes = 0
+            if callable(on_progress):
+                try:
+                    on_progress(downloaded_bytes, total_bytes)
+                except Exception:
+                    pass
             with target.open("wb") as handle:
                 while True:
                     chunk = response.read(1024 * 128)
                     if not chunk:
                         break
                     handle.write(chunk)
+                    downloaded_bytes += len(chunk)
+                    if callable(on_progress):
+                        try:
+                            on_progress(downloaded_bytes, total_bytes)
+                        except Exception:
+                            pass
 
         return target
 
@@ -389,6 +417,41 @@ Write-Log "Updater completed successfully."
 exit 0
 """
 
+_WINDOWS_INSTALLER_LAUNCH_SCRIPT = """param(
+    [int]$AppPid,
+    [string]$InstallerPath,
+    [string]$LogPath
+)
+
+$ErrorActionPreference = "Continue"
+
+function Write-Log([string]$Message) {
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    Add-Content -LiteralPath $LogPath -Value "[$stamp] $Message"
+}
+
+New-Item -Path (Split-Path -Parent $LogPath) -ItemType Directory -Force | Out-Null
+Write-Log "Installer launcher started."
+Write-Log "InstallerPath=$InstallerPath"
+
+for ($attempt = 0; $attempt -lt 180; $attempt++) {
+    if (-not (Get-Process -Id $AppPid -ErrorAction SilentlyContinue)) {
+        Write-Log "App process has exited."
+        break
+    }
+    Start-Sleep -Milliseconds 500
+}
+
+try {
+    Start-Process -FilePath $InstallerPath | Out-Null
+    Write-Log "Installer launched."
+    exit 0
+} catch {
+    Write-Log "Installer launch failed: $($_.Exception.Message)"
+    exit 1
+}
+"""
+
 
 def _windows_powershell_executable() -> str:
     system_root = os.environ.get("SystemRoot", "").strip()
@@ -397,6 +460,12 @@ def _windows_powershell_executable() -> str:
         if candidate.exists():
             return str(candidate)
     return "powershell.exe"
+
+
+def _windows_hidden_creation_flags() -> int:
+    flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    flags |= int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return flags
 
 
 def _read_file_text(path: Path) -> str:
@@ -438,6 +507,8 @@ def launch_windows_zip_updater(
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
+            "-WindowStyle",
+            "Hidden",
             "-File",
             str(script_path),
             "-AppPid",
@@ -452,13 +523,10 @@ def launch_windows_zip_updater(
             str(log_path),
         ]
 
-        creationflags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-        creationflags |= int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-
         process = subprocess.Popen(
             command,
             close_fds=False,
-            creationflags=creationflags,
+            creationflags=_windows_hidden_creation_flags(),
             cwd=str(work_dir),
         )
         time.sleep(0.8)
@@ -473,3 +541,58 @@ def launch_windows_zip_updater(
         return False, f"Could not launch update installer: {exc}"
 
     return True, f"Updater log: {log_path}"
+
+
+def launch_windows_installer_updater(
+    *,
+    installer_path: Path,
+    app_pid: int,
+) -> tuple[bool, str]:
+    if os.name != "nt":
+        return False, "Installer launcher currently supports Windows only."
+
+    installer = Path(installer_path).expanduser().resolve()
+    if not installer.exists():
+        return False, f"Downloaded installer was not found: {installer}"
+
+    try:
+        work_dir = Path(tempfile.mkdtemp(prefix="erpermitsys_installer_"))
+        script_path = work_dir / "launch_installer.ps1"
+        log_path = work_dir / "installer-launcher.log"
+        script_path.write_text(_WINDOWS_INSTALLER_LAUNCH_SCRIPT, encoding="utf-8")
+
+        command = [
+            _windows_powershell_executable(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            str(script_path),
+            "-AppPid",
+            str(int(app_pid)),
+            "-InstallerPath",
+            str(installer),
+            "-LogPath",
+            str(log_path),
+        ]
+
+        process = subprocess.Popen(
+            command,
+            close_fds=False,
+            creationflags=_windows_hidden_creation_flags(),
+            cwd=str(work_dir),
+        )
+        time.sleep(0.8)
+        code = process.poll()
+        if code is not None and code != 0:
+            detail = f"Installer launcher exited early with code {code}."
+            log_text = _read_file_text(log_path).strip()
+            if log_text:
+                detail = f"{detail}\n\n{log_text}"
+            return False, detail
+    except Exception as exc:
+        return False, f"Could not launch installer helper: {exc}"
+
+    return True, f"Installer launcher log: {log_path}"

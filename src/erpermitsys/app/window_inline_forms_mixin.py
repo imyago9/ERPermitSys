@@ -1226,6 +1226,7 @@ class WindowInlineFormsMixin:
             return
         edit_id = str(self._add_property_editing_id or "").strip()
         existing = self._property_by_id(edit_id) if edit_id else None
+        created_new = existing is None
         if edit_id and existing is None:
             self._show_warning_dialog(
                 "Address Not Found",
@@ -1267,6 +1268,8 @@ class WindowInlineFormsMixin:
                 break
         self._selected_property_id = property_record.property_id
         self._close_inline_form_view(require_confirm=False)
+        if created_new:
+            self._set_left_column_expanded_panel("permit")
         self._persist_tracker_data()
         self._refresh_all_views()
 

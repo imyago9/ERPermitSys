@@ -36,6 +36,18 @@ class WindowShellMixin:
             close_app=self.close,
             expand_window=self.expand_window,
             shrink_window=self.shrink_window,
+            open_home_view=self._open_home_tracker_view,
+            open_admin_contacts=lambda: self._open_contacts_and_jurisdictions_dialog(
+                preferred_tab="contacts"
+            ),
+            open_admin_templates=self._open_document_templates_view,
+            open_add_property=self._open_add_property_view,
+            open_add_permit=self._open_add_permit_view,
+            upload_documents=self._upload_documents_to_slot,
+            focus_property_search=self._focus_property_search_input,
+            focus_permit_search=self._focus_permit_search_input,
+            check_updates=self._on_check_updates_requested,
+            switch_storage_backend=self._on_data_storage_backend_changed,
         )
 
     def open_settings_dialog(self) -> None:
@@ -51,6 +63,14 @@ class WindowShellMixin:
                 on_palette_shortcut_changed=self._on_palette_shortcut_changed,
                 data_storage_folder=str(self._data_storage_folder),
                 on_data_storage_folder_changed=self._on_data_storage_folder_changed,
+                data_storage_backend=str(self._data_storage_backend),
+                on_data_storage_backend_changed=self._on_data_storage_backend_changed,
+                on_export_json_backup_requested=self._on_export_json_backup_requested,
+                on_import_json_backup_requested=self._on_import_json_backup_requested,
+                supabase_settings=self._supabase_settings.to_mapping(redact_api_key=False),
+                on_supabase_settings_changed=self._on_supabase_settings_changed,
+                supabase_merge_on_switch=self._supabase_merge_on_switch,
+                on_supabase_merge_on_switch_changed=self._on_supabase_merge_on_switch_changed,
                 app_version=self._app_version,
                 on_check_updates_requested=self._on_check_updates_requested,
             )
@@ -69,6 +89,33 @@ class WindowShellMixin:
         dialog.raise_()
         dialog.activateWindow()
         self._state_streamer.record("settings.opened", source="main_window", payload={})
+
+    def _open_home_tracker_view(self) -> None:
+        if self._panel_stack is None or self._panel_home_view is None:
+            return
+        current = self._panel_stack.currentWidget()
+        if current is self._panel_admin_view:
+            self._close_contacts_and_jurisdictions_view()
+            return
+        if self._active_inline_form_view:
+            self._close_inline_form_view(require_confirm=True, action_label="Open Home")
+            return
+        self._panel_stack.setCurrentWidget(self._panel_home_view)
+        self._sync_foreground_layout()
+
+    def _focus_property_search_input(self) -> None:
+        widget = self._property_search_input
+        if widget is None:
+            return
+        widget.setFocus()
+        widget.selectAll()
+
+    def _focus_permit_search_input(self) -> None:
+        widget = self._permit_search_input
+        if widget is None:
+            return
+        widget.setFocus()
+        widget.selectAll()
 
     def close_settings_dialog(self) -> bool:
         dialog = self._settings_dialog
@@ -114,15 +161,18 @@ class WindowShellMixin:
         QTimer.singleShot(0, self._sync_foreground_layout)
 
     def closeEvent(self, event) -> None:
-        if not self._confirm_discard_inline_form_changes(action_label="Exit App"):
-            event.ignore()
-            return
-        if not self._confirm_discard_admin_view_changes(action_label="Exit App"):
-            event.ignore()
-            return
-        if not self._confirm_discard_template_changes(action_label="Exit App"):
-            event.ignore()
-            return
+        skip_dirty_confirmations = bool(getattr(self, "_close_requested_for_update", False))
+        if not skip_dirty_confirmations:
+            if not self._confirm_discard_inline_form_changes(action_label="Exit App"):
+                event.ignore()
+                return
+            if not self._confirm_discard_admin_view_changes(action_label="Exit App"):
+                event.ignore()
+                return
+            if not self._confirm_discard_template_changes(action_label="Exit App"):
+                event.ignore()
+                return
+        self._shutdown_supabase_realtime_subscription()
         self._persist_tracker_data(show_error_dialog=False)
         dialog = self._settings_dialog
         if dialog is not None:

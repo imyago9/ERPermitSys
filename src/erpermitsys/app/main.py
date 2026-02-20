@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from PySide6.QtCore import QTimer, Qt
@@ -14,17 +15,21 @@ except Exception:  # pragma: no cover - optional runtime dependency
 
 from erpermitsys.app.background_plugin_bridge import BackgroundPluginBridge
 from erpermitsys.app.command_runtime import CommandRuntime
-from erpermitsys.app.data_store import BACKEND_LOCAL_JSON, LocalJsonDataStore
-from erpermitsys.app.document_store import LocalPermitDocumentStore
+from erpermitsys.app.data_store import BACKEND_LOCAL_SQLITE, create_data_store
+from erpermitsys.app.document_store import create_document_store
 from erpermitsys.app.settings_store import (
     DEFAULT_PALETTE_SHORTCUT,
+    SupabaseSettings,
     load_dark_mode,
     load_data_storage_backend,
     load_data_storage_folder,
     load_palette_shortcut_enabled,
     load_palette_shortcut_keybind,
+    load_supabase_merge_on_switch,
+    load_supabase_settings,
     save_palette_shortcut_settings,
 )
+from erpermitsys.app.state_containers import AdminState, StorageState, WorkspaceState
 from erpermitsys.app.window_documents_mixin import WindowDocumentsMixin
 from erpermitsys.app.window_document_templates_mixin import WindowDocumentTemplatesMixin
 from erpermitsys.app.window_entity_actions_mixin import WindowEntityActionsMixin
@@ -115,10 +120,20 @@ class ErPermitSysWindow(
         self._settings_dialog: SettingsDialog | None = None
         self._command_runtime: CommandRuntime | None = None
 
-        self._data_storage_backend = load_data_storage_backend(default=BACKEND_LOCAL_JSON)
-        self._data_storage_folder = load_data_storage_folder()
-        self._data_store = LocalJsonDataStore(self._data_storage_folder)
-        self._document_store = LocalPermitDocumentStore(self._data_storage_folder)
+        self._storage_state = StorageState(
+            backend=load_data_storage_backend(default=BACKEND_LOCAL_SQLITE),
+            data_storage_folder=load_data_storage_folder(),
+            supabase_settings=load_supabase_settings(),
+            supabase_merge_on_switch=load_supabase_merge_on_switch(),
+        )
+        self._data_storage_backend = self._storage_state.backend
+        self._data_storage_folder = self._storage_state.data_storage_folder
+        self._supabase_settings = self._storage_state.supabase_settings
+        self._data_store = create_data_store(self._data_storage_backend, self._data_storage_folder)
+        self._document_store = create_document_store(
+            self._data_storage_backend,
+            self._data_storage_folder,
+        )
 
         self._app_version = APP_VERSION
         self._auto_update_github_repo = GITHUB_RELEASE_REPO
@@ -133,11 +148,13 @@ class ErPermitSysWindow(
         self._document_templates: list[DocumentChecklistTemplate] = []
         self._active_document_template_ids: dict[str, str] = {}
 
-        self._selected_property_id: str = ""
-        self._selected_permit_id: str = ""
-        self._active_permit_type_filter: str = "all"
-        self._selected_document_slot_id: str = ""
-        self._selected_document_id: str = ""
+        self._workspace_state = WorkspaceState()
+        self._selected_property_id = self._workspace_state.selected_property_id
+        self._selected_permit_id = self._workspace_state.selected_permit_id
+        self._active_permit_type_filter = self._workspace_state.active_permit_type_filter
+        self._selected_document_slot_id = self._workspace_state.selected_document_slot_id
+        self._selected_document_id = self._workspace_state.selected_document_id
+        self._admin_state = AdminState()
         self._timeline_debug_enabled: bool = _is_truthy_env(os.getenv(_TIMELINE_DEBUG_ENV, ""))
         self._timeline_debug_log_path: str = str(os.getenv(_TIMELINE_DEBUG_LOG_ENV, "")).strip()
         self._timeline_debug_sequence: int = 0
@@ -152,6 +169,7 @@ class ErPermitSysWindow(
         self._restore_active_plugins()
         self._sync_background_from_plugins()
         self._refresh_all_views()
+        self._sync_supabase_realtime_subscription()
 
         if storage_warning:
             QTimer.singleShot(0, lambda message=storage_warning: self._show_data_storage_warning(message))
@@ -177,6 +195,94 @@ class ErPermitSysWindow(
             properties=len(self._properties),
             permits=len(self._permits),
         )
+
+    @property
+    def _selected_property_id(self) -> str:
+        return self._workspace_state.selected_property_id
+
+    @_selected_property_id.setter
+    def _selected_property_id(self, value: str) -> None:
+        self._workspace_state.selected_property_id = str(value or "").strip()
+
+    @property
+    def _selected_permit_id(self) -> str:
+        return self._workspace_state.selected_permit_id
+
+    @_selected_permit_id.setter
+    def _selected_permit_id(self, value: str) -> None:
+        self._workspace_state.selected_permit_id = str(value or "").strip()
+
+    @property
+    def _selected_document_slot_id(self) -> str:
+        return self._workspace_state.selected_document_slot_id
+
+    @_selected_document_slot_id.setter
+    def _selected_document_slot_id(self, value: str) -> None:
+        self._workspace_state.selected_document_slot_id = str(value or "").strip()
+
+    @property
+    def _selected_document_id(self) -> str:
+        return self._workspace_state.selected_document_id
+
+    @_selected_document_id.setter
+    def _selected_document_id(self, value: str) -> None:
+        self._workspace_state.selected_document_id = str(value or "").strip()
+
+    @property
+    def _active_permit_type_filter(self) -> str:
+        return self._workspace_state.active_permit_type_filter
+
+    @_active_permit_type_filter.setter
+    def _active_permit_type_filter(self, value: str) -> None:
+        self._workspace_state.active_permit_type_filter = str(value or "").strip()
+
+    @property
+    def _data_storage_backend(self) -> str:
+        return self._storage_state.backend
+
+    @_data_storage_backend.setter
+    def _data_storage_backend(self, value: str) -> None:
+        self._storage_state.backend = str(value or "").strip()
+
+    @property
+    def _data_storage_folder(self) -> Path:
+        return self._storage_state.data_storage_folder
+
+    @_data_storage_folder.setter
+    def _data_storage_folder(self, value: Path | str) -> None:
+        self._storage_state.data_storage_folder = value if isinstance(value, Path) else Path(value)
+
+    @property
+    def _supabase_settings(self) -> SupabaseSettings:
+        return self._storage_state.supabase_settings
+
+    @_supabase_settings.setter
+    def _supabase_settings(self, value: SupabaseSettings) -> None:
+        self._storage_state.supabase_settings = value
+
+    @property
+    def _supabase_merge_on_switch(self) -> bool:
+        return bool(self._storage_state.supabase_merge_on_switch)
+
+    @_supabase_merge_on_switch.setter
+    def _supabase_merge_on_switch(self, value: bool) -> None:
+        self._storage_state.supabase_merge_on_switch = bool(value)
+
+    @property
+    def _admin_contact_dirty(self) -> bool:
+        return self._admin_state.contact_dirty
+
+    @_admin_contact_dirty.setter
+    def _admin_contact_dirty(self, value: bool) -> None:
+        self._admin_state.contact_dirty = bool(value)
+
+    @property
+    def _admin_jurisdiction_dirty(self) -> bool:
+        return self._admin_state.jurisdiction_dirty
+
+    @_admin_jurisdiction_dirty.setter
+    def _admin_jurisdiction_dirty(self, value: bool) -> None:
+        self._admin_state.jurisdiction_dirty = bool(value)
 
 def run(argv: Sequence[str] | None = None) -> int:
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)

@@ -56,11 +56,11 @@ class CommandPaletteDialog(QDialog):
 
         title = QLabel("Command Palette", frame)
         title.setObjectName("CommandPaletteTitle")
-        shortcut = QLabel("Ctrl+Space", frame)
-        shortcut.setObjectName("CommandPaletteShortcut")
+        self._shortcut_label = QLabel("Ctrl+Space", frame)
+        self._shortcut_label.setObjectName("CommandPaletteShortcut")
         title_row.addWidget(title)
         title_row.addStretch(1)
-        title_row.addWidget(shortcut)
+        title_row.addWidget(self._shortcut_label)
         frame_layout.addLayout(title_row)
 
         self._input = QLineEdit(frame)
@@ -127,6 +127,10 @@ class CommandPaletteDialog(QDialog):
 
     def set_status(self, text: str) -> None:
         self._status.setText(text)
+
+    def set_shortcut_text(self, text: str) -> None:
+        value = str(text or "").strip() or "Ctrl+Space"
+        self._shortcut_label.setText(value)
 
     def _on_query_text_changed(self, text: str) -> None:
         self.query_changed.emit(text)

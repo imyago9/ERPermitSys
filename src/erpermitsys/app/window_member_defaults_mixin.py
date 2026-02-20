@@ -16,6 +16,8 @@ class WindowMemberDefaultsMixin:
         self._panel_add_permit_view = None
         self._admin_tabs = None
         self._admin_templates_tab_index = -1
+        self._admin_tab_change_guard = False
+        self._admin_active_tab_index = 0
         self._permit_workspace_panel = None
         self._permit_workspace_content_host = None
         self._permit_workspace_blur_effect = None
@@ -23,6 +25,13 @@ class WindowMemberDefaultsMixin:
         self._permit_workspace_blurred = False
         self._active_inline_form_view = ""
         self._inline_form_cards = []
+        self._storage_update_service_instance = None
+        self._admin_layout_service_instance = None
+        self._supabase_realtime_client = None
+        self._supabase_realtime_pending_refresh = False
+        self._supabase_realtime_pending_notice_shown = False
+        self._supabase_realtime_apply_running = False
+        self._close_requested_for_update = False
 
         self._settings_button = None
         self._settings_button_shadow = None

@@ -5,10 +5,23 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-and-release:
     runs-on: windows-latest
+    env:
+      APP_NAME: erpermitsys
+      ZIP_ASSET_NAME: erpermitsys-windows.zip
+      INSTALLER_ASSET_NAME: erpermitsys-setup.exe
+
+      # JournalTrade-compatible Azure Trusted Signing variables.
+      ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT || secrets.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT_NAME: ${{ vars.ARTIFACT_SIGNING_ACCOUNT_NAME || vars.ARTIFACT_ACCOUNT_NAME || secrets.ARTIFACT_SIGNING_ACCOUNT_NAME || secrets.ARTIFACT_ACCOUNT_NAME }}
+      ARTIFACT_SIGNING_CERT_PROFILE_NAME: ${{ vars.ARTIFACT_SIGNING_CERT_PROFILE_NAME || secrets.ARTIFACT_SIGNING_CERT_PROFILE_NAME }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
 
     steps:
       - name: Checkout
@@ -39,6 +52,46 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Preparing release $TAG from commit $GITHUB_SHA"
+
+      - name: Read updater metadata from version.py
+        id: updater_meta
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          text = pathlib.Path("src/erpermitsys/version.py").read_text(encoding="utf-8")
+
+          def read_constant(name: str) -> str:
+              match = re.search(rf'^{name}\s*=\s*"([^"]+)"', text, re.MULTILINE)
+              if not match:
+                  raise SystemExit(f"{name} was not found in src/erpermitsys/version.py")
+              return match.group(1).strip()
+
+          app_repo = read_constant("GITHUB_RELEASE_REPO")
+          app_asset = read_constant("GITHUB_RELEASE_ASSET_NAME")
+          out_path = os.environ["GITHUB_OUTPUT"]
+          with open(out_path, "a", encoding="utf-8") as handle:
+              handle.write(f"app_repo={app_repo}\n")
+              handle.write(f"app_asset={app_asset}\n")
+          PY
+
+      - name: Validate updater release metadata
+        shell: bash
+        run: |
+          APP_REPO="${{ steps.updater_meta.outputs.app_repo }}"
+          APP_ASSET="${{ steps.updater_meta.outputs.app_asset }}"
+
+          if [[ "$APP_ASSET" != "${ZIP_ASSET_NAME}" && "$APP_ASSET" != "${INSTALLER_ASSET_NAME}" ]]; then
+            echo "Mismatch: GITHUB_RELEASE_ASSET_NAME='$APP_ASSET' must be '${ZIP_ASSET_NAME}' or '${INSTALLER_ASSET_NAME}'."
+            exit 1
+          fi
+
+          if [[ "$APP_REPO" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "::warning::GITHUB_RELEASE_REPO in version.py is '$APP_REPO' but this workflow runs in '${GITHUB_REPOSITORY}'."
+          fi
 
       - name: Ensure release tag does not already exist
         shell: bash
@@ -73,8 +126,72 @@ jobs:
             --add-data "config;config" \
             run.py
 
-      - name: Import code-signing certificate (optional)
-        if: ${{ secrets.WINDOWS_SIGNING_CERT_PFX_BASE64 != '' && secrets.WINDOWS_SIGNING_CERT_PASSWORD != '' }}
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler not found at: $iscc"
+          }
+          & $iscc `
+            "/DAppVersion=${{ steps.meta.outputs.version }}" `
+            "/DAppExeDir=$env:GITHUB_WORKSPACE\dist\erpermitsys" `
+            "/DOutputDir=$env:GITHUB_WORKSPACE\dist" `
+            "scripts\windows\erpermitsys.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compilation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Evaluate Azure Trusted Signing configuration
+        id: trusted_signing
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${ARTIFACT_SIGNING_ENDPOINT}" ]] || missing+=("ARTIFACT_SIGNING_ENDPOINT")
+          [[ -n "${ARTIFACT_SIGNING_ACCOUNT_NAME}" ]] || missing+=("ARTIFACT_SIGNING_ACCOUNT_NAME/ARTIFACT_ACCOUNT_NAME")
+          [[ -n "${ARTIFACT_SIGNING_CERT_PROFILE_NAME}" ]] || missing+=("ARTIFACT_SIGNING_CERT_PROFILE_NAME")
+          [[ -n "${AZURE_CLIENT_ID}" ]] || missing+=("AZURE_CLIENT_ID")
+          [[ -n "${AZURE_TENANT_ID}" ]] || missing+=("AZURE_TENANT_ID")
+          [[ -n "${AZURE_SUBSCRIPTION_ID}" ]] || missing+=("AZURE_SUBSCRIPTION_ID")
+
+          if (( ${#missing[@]} == 0 )); then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Azure Trusted Signing is enabled."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Azure Trusted Signing is disabled; missing: ${missing[*]}"
+          fi
+
+      - name: Azure login for Trusted Signing
+        if: ${{ steps.trusted_signing.outputs.enabled == 'true' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign app and installer with Azure Trusted Signing
+        if: ${{ steps.trusted_signing.outputs.enabled == 'true' }}
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ env.AZURE_TENANT_ID }}
+          azure-client-id: ${{ env.AZURE_CLIENT_ID }}
+          endpoint: ${{ env.ARTIFACT_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ env.ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_CERT_PROFILE_NAME }}
+          files: |
+            ${{ github.workspace }}\dist\erpermitsys\erpermitsys.exe
+            ${{ github.workspace }}\dist\erpermitsys-setup.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Import code-signing certificate (fallback)
+        if: ${{ steps.trusted_signing.outputs.enabled != 'true' && secrets.WINDOWS_SIGNING_CERT_PFX_BASE64 != '' && secrets.WINDOWS_SIGNING_CERT_PASSWORD != '' }}
         shell: pwsh
         run: |
           $certPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
@@ -84,7 +201,7 @@ jobs:
           )
           "WINDOWS_SIGNING_CERT_PATH=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Sign Windows executable (optional)
+      - name: Sign app and installer with PFX (fallback)
         if: ${{ env.WINDOWS_SIGNING_CERT_PATH != '' }}
         shell: pwsh
         run: |
@@ -94,17 +211,25 @@ jobs:
             /tr "http://timestamp.digicert.com" `
             /td SHA256 `
             "dist/erpermitsys/erpermitsys.exe"
+          signtool sign /fd SHA256 `
+            /f "$env:WINDOWS_SIGNING_CERT_PATH" `
+            /p "${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}" `
+            /tr "http://timestamp.digicert.com" `
+            /td SHA256 `
+            "dist/erpermitsys-setup.exe"
 
-      - name: Package zip asset
+      - name: Package zip asset (auto-update channel)
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/erpermitsys/*" -DestinationPath "dist/erpermitsys-windows.zip" -Force
+          Compress-Archive -Path "dist/erpermitsys/*" -DestinationPath "dist/${{ env.ZIP_ASSET_NAME }}" -Force
 
-      - name: Publish GitHub release asset
+      - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          files: dist/erpermitsys-windows.zip
+          files: |
+            dist/${{ env.ZIP_ASSET_NAME }}
+            dist/${{ env.INSTALLER_ASSET_NAME }}
           generate_release_notes: true

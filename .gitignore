@@ -33,6 +33,10 @@ timeline-debug.jsonl
 *.tmp
 *.bak
 
+# Supabase local CLI metadata
+supabase/.temp/
+supabase/.branches/
+
 # Build artifacts
 build/
 dist/

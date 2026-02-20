@@ -8,6 +8,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QEvent, QObject, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
+from erpermitsys.app.data_store import BACKEND_LOCAL_SQLITE, BACKEND_SUPABASE
 from erpermitsys.core import (
     CommandBus,
     CommandDefinition,
@@ -44,6 +45,16 @@ class AppCommandContext:
     close_app: Callable[[], None]
     expand_window: Callable[[], None]
     shrink_window: Callable[[], None]
+    open_home_view: Callable[[], None] | None = None
+    open_admin_contacts: Callable[[], None] | None = None
+    open_admin_templates: Callable[[], None] | None = None
+    open_add_property: Callable[[], None] | None = None
+    open_add_permit: Callable[[], None] | None = None
+    upload_documents: Callable[[], None] | None = None
+    focus_property_search: Callable[[], None] | None = None
+    focus_permit_search: Callable[[], None] | None = None
+    check_updates: Callable[[], None] | None = None
+    switch_storage_backend: Callable[[str], str] | None = None
 
 
 def _open_settings(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
@@ -84,6 +95,124 @@ def _settings_dialog_open(context: AppCommandContext, _request: CommandRequest) 
 
 def _settings_dialog_closed(context: AppCommandContext, _request: CommandRequest) -> bool:
     return not context.is_settings_dialog_open()
+
+
+def _call_optional_action(
+    context: AppCommandContext,
+    attribute: str,
+    *,
+    success_message: str,
+    unavailable_message: str,
+) -> CommandResult:
+    action = getattr(context, attribute, None)
+    if not callable(action):
+        return CommandResult(ok=False, message=unavailable_message)
+    action()
+    return CommandResult(ok=True, message=success_message)
+
+
+def _supports_attribute(attribute: str) -> Callable[[AppCommandContext, CommandRequest], bool]:
+    def _predicate(context: AppCommandContext, _request: CommandRequest) -> bool:
+        return callable(getattr(context, attribute, None))
+
+    return _predicate
+
+
+def _open_home_view(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "open_home_view",
+        success_message="Opened home tracker view.",
+        unavailable_message="Home tracker view is not available.",
+    )
+
+
+def _open_admin_contacts(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "open_admin_contacts",
+        success_message="Opened admin contacts view.",
+        unavailable_message="Admin contacts view is not available.",
+    )
+
+
+def _open_admin_templates(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "open_admin_templates",
+        success_message="Opened document templates view.",
+        unavailable_message="Document templates view is not available.",
+    )
+
+
+def _open_add_property(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "open_add_property",
+        success_message="Opened add address form.",
+        unavailable_message="Add address form is not available.",
+    )
+
+
+def _open_add_permit(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "open_add_permit",
+        success_message="Opened add permit form.",
+        unavailable_message="Add permit form is not available.",
+    )
+
+
+def _upload_documents(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "upload_documents",
+        success_message="Upload dialog opened.",
+        unavailable_message="Document upload is not available right now.",
+    )
+
+
+def _focus_property_search(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "focus_property_search",
+        success_message="Focused address search.",
+        unavailable_message="Address search is not available.",
+    )
+
+
+def _focus_permit_search(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "focus_permit_search",
+        success_message="Focused permit search.",
+        unavailable_message="Permit search is not available.",
+    )
+
+
+def _check_updates(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    return _call_optional_action(
+        context,
+        "check_updates",
+        success_message="Update check requested.",
+        unavailable_message="Update checks are not available.",
+    )
+
+
+def _switch_backend_local(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    action = context.switch_storage_backend
+    if not callable(action):
+        return CommandResult(ok=False, message="Storage backend switching is not available.")
+    backend = action(BACKEND_LOCAL_SQLITE)
+    return CommandResult(ok=True, message=f"Switched backend to {backend}.")
+
+
+def _switch_backend_supabase(context: AppCommandContext, _request: CommandRequest) -> CommandResult:
+    action = context.switch_storage_backend
+    if not callable(action):
+        return CommandResult(ok=False, message="Storage backend switching is not available.")
+    backend = action(BACKEND_SUPABASE)
+    return CommandResult(ok=True, message=f"Switched backend to {backend}.")
 
 
 def register_default_commands(registry: CommandRegistry) -> None:
@@ -156,6 +285,138 @@ def register_default_commands(registry: CommandRegistry) -> None:
                     keywords=("smaller", "downsize"),
                 ),
                 handler=_shrink_window,
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="view.home",
+                    title="Open Home Tracker",
+                    description="Return to the main tracker panel.",
+                    category="View",
+                    aliases=("home", "tracker"),
+                    keywords=("panel", "workspace"),
+                ),
+                handler=_open_home_view,
+                is_enabled=_supports_attribute("open_home_view"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="view.admin.contacts",
+                    title="Open Admin Contacts",
+                    description="Open the admin panel on the contacts tab.",
+                    category="View",
+                    aliases=("admin contacts",),
+                    keywords=("admin", "contacts"),
+                ),
+                handler=_open_admin_contacts,
+                is_enabled=_supports_attribute("open_admin_contacts"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="view.admin.templates",
+                    title="Open Document Templates",
+                    description="Open the admin panel on the document templates tab.",
+                    category="View",
+                    aliases=("templates", "document templates"),
+                    keywords=("admin", "templates"),
+                ),
+                handler=_open_admin_templates,
+                is_enabled=_supports_attribute("open_admin_templates"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="form.address.new",
+                    title="Add Address",
+                    description="Open the inline add-address form.",
+                    category="Data",
+                    aliases=("new address", "add property"),
+                    keywords=("address", "property"),
+                ),
+                handler=_open_add_property,
+                is_enabled=_supports_attribute("open_add_property"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="form.permit.new",
+                    title="Add Permit",
+                    description="Open the inline add-permit form.",
+                    category="Data",
+                    aliases=("new permit",),
+                    keywords=("permit",),
+                ),
+                handler=_open_add_permit,
+                is_enabled=_supports_attribute("open_add_permit"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="documents.upload",
+                    title="Upload Documents",
+                    description="Upload documents to the selected checklist slot.",
+                    category="Documents",
+                    aliases=("upload docs", "upload files"),
+                    keywords=("documents", "slot"),
+                ),
+                handler=_upload_documents,
+                is_enabled=_supports_attribute("upload_documents"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="search.address.focus",
+                    title="Focus Address Search",
+                    description="Move focus to the address search field.",
+                    category="Navigation",
+                    aliases=("focus property search",),
+                    keywords=("search", "address"),
+                ),
+                handler=_focus_property_search,
+                is_enabled=_supports_attribute("focus_property_search"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="search.permit.focus",
+                    title="Focus Permit Search",
+                    description="Move focus to the permit search field.",
+                    category="Navigation",
+                    aliases=("focus permit search",),
+                    keywords=("search", "permit"),
+                ),
+                handler=_focus_permit_search,
+                is_enabled=_supports_attribute("focus_permit_search"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="app.updates.check",
+                    title="Check for Updates",
+                    description="Trigger an update check from the main window.",
+                    category="App",
+                    aliases=("update check",),
+                    keywords=("version", "release"),
+                ),
+                handler=_check_updates,
+                is_enabled=_supports_attribute("check_updates"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="storage.backend.local_sqlite",
+                    title="Switch Storage to Local SQLite",
+                    description="Switch tracker data backend to local SQLite storage.",
+                    category="Storage",
+                    aliases=("storage local", "backend local", "storage local json"),
+                    keywords=("storage", "local", "sqlite"),
+                ),
+                handler=_switch_backend_local,
+                is_enabled=_supports_attribute("switch_storage_backend"),
+            ),
+            CommandDefinition(
+                info=CommandInfo(
+                    command_id="storage.backend.supabase",
+                    title="Switch Storage to Supabase",
+                    description="Switch tracker data backend to Supabase storage.",
+                    category="Storage",
+                    aliases=("storage supabase", "backend supabase"),
+                    keywords=("storage", "supabase", "remote"),
+                ),
+                handler=_switch_backend_supabase,
+                is_enabled=_supports_attribute("switch_storage_backend"),
             ),
         )
     )
@@ -286,6 +547,7 @@ class CommandRuntime:
         self._palette = CommandPaletteDialog()
         self._palette.query_changed.connect(self._refresh_palette)
         self._palette.command_requested.connect(self._run_from_palette)
+        self._palette.set_shortcut_text(self._shortcut_binding.text)
 
         self._install_shortcut_handlers()
         self._app.aboutToQuit.connect(self._dispose_shortcut_handlers)
@@ -321,6 +583,7 @@ class CommandRuntime:
 
         self._shortcut_enabled = enabled_value
         self._shortcut_binding = binding
+        self._palette.set_shortcut_text(self._shortcut_binding.text)
         self._dispose_shortcut_handlers()
         self._install_shortcut_handlers()
 
@@ -409,7 +672,7 @@ class CommandRuntime:
                     payload={
                         "enabled": True,
                         "key": self._shortcut_binding.text,
-                        "scope": "global_with_unfocused_close_only",
+                        "scope": "global_toggle_palette",
                         "backend": "winapi",
                     },
                 )
@@ -421,7 +684,7 @@ class CommandRuntime:
                 payload={
                     "enabled": True,
                     "key": self._shortcut_binding.text,
-                    "scope": "global_with_unfocused_close_only",
+                    "scope": "global_toggle_palette",
                     "backend": "winapi",
                 },
             )
@@ -463,15 +726,26 @@ class CommandRuntime:
                 pass
 
     def _on_global_hotkey(self) -> None:
-        if self._app.applicationState() == Qt.ApplicationState.ApplicationActive:
-            if self._palette.isVisible():
-                self._hide_palette(trigger="global_hotkey_active")
-                return
-            self.show_palette()
+        if self._palette.isVisible():
+            self._hide_palette(trigger="global_hotkey_toggle")
             return
-        if not self._palette.isVisible():
+        if self._app.applicationState() != Qt.ApplicationState.ApplicationActive:
+            self._focus_anchor_window()
+        self.show_palette()
+
+    def _focus_anchor_window(self) -> None:
+        anchor = self._anchor_widget()
+        if anchor is None:
             return
-        self._hide_palette(trigger="global_hotkey")
+        try:
+            if anchor.isMinimized():
+                anchor.showNormal()
+            if not anchor.isVisible():
+                anchor.show()
+            anchor.raise_()
+            anchor.activateWindow()
+        except Exception:
+            return
 
     def _hide_palette(self, *, trigger: str) -> None:
         if not self._palette.isVisible():

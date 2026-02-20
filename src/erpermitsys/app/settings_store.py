@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from typing import Iterable
@@ -16,12 +17,54 @@ _ACTIVE_PLUGIN_IDS_KEY = "activePluginIds"
 _DATA_STORAGE_FOLDER_KEY = "dataStorageFolder"
 _DATA_STORAGE_BACKEND_KEY = "dataStorageBackend"
 _LEGACY_VAULT_ROOT_KEY = "vaultRoot"
+_SUPABASE_URL_KEY = "supabaseUrl"
+_SUPABASE_API_KEY = "supabaseApiKey"
+_SUPABASE_SCHEMA_KEY = "supabaseSchema"
+_SUPABASE_TRACKER_TABLE_KEY = "supabaseTrackerTable"
+_SUPABASE_STORAGE_BUCKET_KEY = "supabaseStorageBucket"
+_SUPABASE_STORAGE_PREFIX_KEY = "supabaseStoragePrefix"
+_SUPABASE_MERGE_ON_SWITCH_KEY = "supabaseMergeOnSwitch"
 DEFAULT_PALETTE_SHORTCUT = "Ctrl+Space"
-DEFAULT_DATA_STORAGE_BACKEND = "local_json"
+DEFAULT_DATA_STORAGE_BACKEND = "local_sqlite"
+_LEGACY_DATA_STORAGE_BACKEND_MAP: dict[str, str] = {
+    "local_json": DEFAULT_DATA_STORAGE_BACKEND,
+}
+DEFAULT_SUPABASE_SCHEMA = "public"
+DEFAULT_SUPABASE_TRACKER_TABLE = "erpermitsys_state"
+DEFAULT_SUPABASE_STORAGE_BUCKET = "erpermitsys-documents"
+DEFAULT_SUPABASE_STORAGE_PREFIX = "tracker"
+DEFAULT_SUPABASE_MERGE_ON_SWITCH = True
 SUPPORTED_DATA_STORAGE_BACKENDS: tuple[str, ...] = (
     DEFAULT_DATA_STORAGE_BACKEND,
     "supabase",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SupabaseSettings:
+    url: str = ""
+    api_key: str = ""
+    schema: str = DEFAULT_SUPABASE_SCHEMA
+    tracker_table: str = DEFAULT_SUPABASE_TRACKER_TABLE
+    storage_bucket: str = DEFAULT_SUPABASE_STORAGE_BUCKET
+    storage_prefix: str = DEFAULT_SUPABASE_STORAGE_PREFIX
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.url and self.api_key)
+
+    def to_mapping(self, *, redact_api_key: bool = False) -> dict[str, str]:
+        api_key = self.api_key
+        if redact_api_key and api_key:
+            api_key = "********"
+        return {
+            "url": self.url,
+            "api_key": api_key,
+            "schema": self.schema,
+            "tracker_table": self.tracker_table,
+            "storage_bucket": self.storage_bucket,
+            "storage_prefix": self.storage_prefix,
+        }
 
 
 def rewrite_root() -> Path:
@@ -114,6 +157,7 @@ def normalize_data_storage_backend(
         fallback = DEFAULT_DATA_STORAGE_BACKEND
 
     normalized = str(value or "").strip().lower()
+    normalized = _LEGACY_DATA_STORAGE_BACKEND_MAP.get(normalized, normalized)
     if normalized in SUPPORTED_DATA_STORAGE_BACKENDS:
         return normalized
     return fallback
@@ -131,6 +175,96 @@ def save_data_storage_backend(value: str) -> str:
     settings[_DATA_STORAGE_BACKEND_KEY] = resolved
     save_settings(settings)
     return resolved
+
+
+def normalize_supabase_settings(
+    value: SupabaseSettings | dict[str, Any] | None,
+) -> SupabaseSettings:
+    if isinstance(value, SupabaseSettings):
+        raw_url = value.url
+        raw_api_key = value.api_key
+        raw_schema = value.schema
+        raw_tracker_table = value.tracker_table
+        raw_bucket = value.storage_bucket
+        raw_prefix = value.storage_prefix
+    elif isinstance(value, dict):
+        raw_url = value.get("url", "")
+        raw_api_key = value.get("api_key", "")
+        raw_schema = value.get("schema", "")
+        raw_tracker_table = value.get("tracker_table", "")
+        raw_bucket = value.get("storage_bucket", "")
+        raw_prefix = value.get("storage_prefix", "")
+    else:
+        raw_url = ""
+        raw_api_key = ""
+        raw_schema = ""
+        raw_tracker_table = ""
+        raw_bucket = ""
+        raw_prefix = ""
+
+    url = str(raw_url or "").strip().rstrip("/")
+    api_key = str(raw_api_key or "").strip()
+    schema = str(raw_schema or "").strip() or DEFAULT_SUPABASE_SCHEMA
+    tracker_table = str(raw_tracker_table or "").strip() or DEFAULT_SUPABASE_TRACKER_TABLE
+    storage_bucket = str(raw_bucket or "").strip() or DEFAULT_SUPABASE_STORAGE_BUCKET
+    storage_prefix = str(raw_prefix or "").strip().strip("/")
+    if not storage_prefix:
+        storage_prefix = DEFAULT_SUPABASE_STORAGE_PREFIX
+
+    return SupabaseSettings(
+        url=url,
+        api_key=api_key,
+        schema=schema,
+        tracker_table=tracker_table,
+        storage_bucket=storage_bucket,
+        storage_prefix=storage_prefix,
+    )
+
+
+def load_supabase_settings(default: SupabaseSettings | None = None) -> SupabaseSettings:
+    fallback = normalize_supabase_settings(default)
+    settings = load_settings()
+    return normalize_supabase_settings(
+        {
+            "url": settings.get(_SUPABASE_URL_KEY, fallback.url),
+            "api_key": settings.get(_SUPABASE_API_KEY, fallback.api_key),
+            "schema": settings.get(_SUPABASE_SCHEMA_KEY, fallback.schema),
+            "tracker_table": settings.get(_SUPABASE_TRACKER_TABLE_KEY, fallback.tracker_table),
+            "storage_bucket": settings.get(_SUPABASE_STORAGE_BUCKET_KEY, fallback.storage_bucket),
+            "storage_prefix": settings.get(_SUPABASE_STORAGE_PREFIX_KEY, fallback.storage_prefix),
+        }
+    )
+
+
+def save_supabase_settings(value: SupabaseSettings | dict[str, Any]) -> SupabaseSettings:
+    normalized = normalize_supabase_settings(value)
+    settings = load_settings()
+    settings[_SUPABASE_URL_KEY] = normalized.url
+    settings[_SUPABASE_API_KEY] = normalized.api_key
+    settings[_SUPABASE_SCHEMA_KEY] = normalized.schema
+    settings[_SUPABASE_TRACKER_TABLE_KEY] = normalized.tracker_table
+    settings[_SUPABASE_STORAGE_BUCKET_KEY] = normalized.storage_bucket
+    settings[_SUPABASE_STORAGE_PREFIX_KEY] = normalized.storage_prefix
+    save_settings(settings)
+    return normalized
+
+
+def load_supabase_merge_on_switch(
+    default: bool = DEFAULT_SUPABASE_MERGE_ON_SWITCH,
+) -> bool:
+    settings = load_settings()
+    value = settings.get(_SUPABASE_MERGE_ON_SWITCH_KEY, default)
+    if isinstance(value, bool):
+        return value
+    return bool(default)
+
+
+def save_supabase_merge_on_switch(enabled: bool) -> bool:
+    normalized = bool(enabled)
+    settings = load_settings()
+    settings[_SUPABASE_MERGE_ON_SWITCH_KEY] = normalized
+    save_settings(settings)
+    return normalized
 
 
 def load_dark_mode(default: bool = False) -> bool:
