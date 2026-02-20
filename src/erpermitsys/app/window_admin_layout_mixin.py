@@ -1,0 +1,1799 @@
+from __future__ import annotations
+
+from typing import Callable
+
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QColorDialog,
+    QComboBox,
+    QFrame,
+    QFormLayout,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+    QSizePolicy,
+    QStackedLayout,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from erpermitsys.app.permit_workspace_helpers import (
+    join_multi_values as _join_multi_values,
+    parse_multi_values as _parse_multi_values,
+)
+from erpermitsys.app.tracker_models import normalize_list_color
+from erpermitsys.app.window_admin_shared import (
+    _ADMIN_LIST_COLOR_PRESETS,
+    _dot_ring_color,
+    _hex_color_channels,
+    _mix_color_channels,
+    _normalize_card_tint_channels,
+    _rgba_text,
+)
+from erpermitsys.ui.widgets import EdgeLockedScrollArea, TrackerHoverEntityCard
+
+
+class WindowAdminLayoutMixin:
+    def _build_contacts_and_jurisdictions_view(self, parent: QWidget) -> QWidget:
+        view = QWidget(parent)
+        view.setObjectName("ContactsJurisdictionsView")
+        layout = QVBoxLayout(view)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        header = QFrame(view)
+        header.setObjectName("TrackerPanel")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(14, 12, 14, 12)
+        header_layout.setSpacing(8)
+
+        title = QLabel("Admin Panel", header)
+        title.setObjectName("TrackerPanelTitle")
+        header_layout.addWidget(title, 0)
+
+        hint = QLabel(
+            "Select an existing record on the left to edit it, or use the Add New button to create a new one.",
+            header,
+        )
+        hint.setObjectName("TrackerPanelMeta")
+        hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(hint, 1)
+
+        back_button = QPushButton("Back to Tracker", header)
+        back_button.setObjectName("TrackerPanelActionButton")
+        back_button.setProperty("adminBackButton", "true")
+        back_button.setMinimumHeight(34)
+        back_button.setMinimumWidth(150)
+        back_button.clicked.connect(self._close_contacts_and_jurisdictions_view)
+        header_layout.addWidget(back_button, 0)
+        layout.addWidget(header, 0)
+
+        content = QFrame(view)
+        content.setObjectName("TrackerPanel")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(14, 12, 14, 14)
+        content_layout.setSpacing(10)
+        layout.addWidget(content, 1)
+
+        tabs = QTabWidget(content)
+        tabs.setObjectName("ContactsJurisdictionsTabs")
+        tabs.tabBar().setExpanding(False)
+        self._admin_tabs = tabs
+        content_layout.addWidget(tabs, 1)
+
+        contact_tab = QWidget(tabs)
+        contact_layout = QHBoxLayout(contact_tab)
+        contact_layout.setContentsMargins(0, 0, 0, 0)
+        contact_layout.setSpacing(14)
+
+        contact_left_card = QFrame(contact_tab)
+        contact_left_card.setObjectName("AdminListPane")
+        contact_left = QVBoxLayout(contact_left_card)
+        contact_left.setContentsMargins(12, 12, 12, 12)
+        contact_left.setSpacing(10)
+
+        contacts_title = QLabel("Contacts Directory", contact_left_card)
+        contacts_title.setObjectName("AdminListTitleChip")
+        contact_left.addWidget(contacts_title, 0)
+
+        contacts_hint = QLabel(
+            "Find contacts quickly, then edit details and communication bundles on the right.",
+            contact_left_card,
+        )
+        contacts_hint.setObjectName("AdminSectionHint")
+        contacts_hint.setWordWrap(True)
+        contact_left.addWidget(contacts_hint, 0)
+
+        contacts_search = QLineEdit(contact_left_card)
+        contacts_search.setObjectName("TrackerPanelSearch")
+        contacts_search.setPlaceholderText("Search contacts (name, role, email, number, note)")
+        contacts_search.setClearButtonEnabled(True)
+        contacts_search.textChanged.connect(self._on_admin_contacts_search_changed)
+        contact_left.addWidget(contacts_search, 0)
+        self._admin_contacts_search_input = contacts_search
+
+        add_contact_button = QPushButton("Add New Contact", contact_left_card)
+        add_contact_button.setObjectName("TrackerPanelActionButton")
+        add_contact_button.setProperty("adminPrimaryCta", "true")
+        add_contact_button.setMinimumHeight(34)
+        add_contact_button.clicked.connect(self._on_admin_add_new_contact_clicked)
+        contact_left.addWidget(add_contact_button, 0)
+
+        contacts_count_label = QLabel("0 contacts", contact_left_card)
+        contacts_count_label.setObjectName("TrackerPanelMeta")
+        contact_left.addWidget(contacts_count_label, 0)
+        self._admin_contacts_count_label = contacts_count_label
+
+        contacts_list_host = QWidget(contact_left_card)
+        contacts_list_stack = QStackedLayout(contacts_list_host)
+        contacts_list_stack.setContentsMargins(0, 0, 0, 0)
+        contacts_list_stack.setSpacing(0)
+
+        contacts_list = QListWidget(contacts_list_host)
+        contacts_list.setObjectName("TrackerPanelList")
+        contacts_list.setWordWrap(True)
+        contacts_list.setSpacing(6)
+        contacts_list.itemSelectionChanged.connect(self._on_admin_contact_selected)
+        contacts_list_stack.addWidget(contacts_list)
+        self._admin_contacts_list_widget = contacts_list
+
+        contacts_empty_label = QLabel(
+            "No contacts yet.\nUse Add New Contact to get started.",
+            contacts_list_host,
+        )
+        contacts_empty_label.setObjectName("AdminListEmptyState")
+        contacts_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        contacts_empty_label.setWordWrap(True)
+        contacts_list_stack.addWidget(contacts_empty_label)
+        self._admin_contacts_empty_label = contacts_empty_label
+        self._admin_contacts_list_stack = contacts_list_stack
+
+        contact_left.addWidget(contacts_list_host, 1)
+
+        contact_layout.addWidget(contact_left_card, 1)
+
+        contact_right_host = QWidget(contact_tab)
+        contact_right_layout = QHBoxLayout(contact_right_host)
+        contact_right_layout.setContentsMargins(0, 0, 0, 0)
+        contact_right_layout.setSpacing(0)
+
+        contact_scroll = EdgeLockedScrollArea(contact_right_host)
+        contact_scroll.setObjectName("AdminEditorScroll")
+        contact_scroll.setWidgetResizable(True)
+        contact_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        contact_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        contact_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        contact_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        contact_scroll.viewport().setAutoFillBackground(False)
+        contact_scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+
+        contact_form = QFrame(contact_scroll)
+        contact_form.setObjectName("PermitFormCard")
+        contact_form.setProperty("adminForm", "true")
+        contact_form.setMinimumWidth(500)
+        self._admin_contact_form_widget = contact_form
+        contact_form_layout = QVBoxLayout(contact_form)
+        contact_form_layout.setContentsMargins(14, 14, 14, 14)
+        contact_form_layout.setSpacing(11)
+
+        contact_header_bar = QFrame(contact_form)
+        contact_header_bar.setObjectName("AdminHeaderBar")
+        contact_header_row = QHBoxLayout(contact_header_bar)
+        contact_header_row.setContentsMargins(10, 8, 10, 8)
+        contact_header_row.setSpacing(8)
+
+        contact_mode_label = QLabel("Adding New Contact", contact_form)
+        contact_mode_label.setObjectName("AdminModeTitle")
+        contact_header_row.addWidget(contact_mode_label, 0)
+        self._admin_contact_mode_label = contact_mode_label
+
+        contact_header_row.addStretch(1)
+
+        save_contact_button = QPushButton("Create Contact", contact_form)
+        save_contact_button.setObjectName("TrackerPanelActionButton")
+        save_contact_button.setProperty("adminPrimaryCta", "true")
+        save_contact_button.setMinimumHeight(32)
+        save_contact_button.clicked.connect(self._admin_save_contact)
+        contact_header_row.addWidget(save_contact_button, 0)
+        self._admin_contact_save_button = save_contact_button
+
+        delete_contact_button = QPushButton("Delete Contact", contact_form)
+        delete_contact_button.setObjectName("PermitFormDangerButton")
+        delete_contact_button.setMinimumHeight(32)
+        delete_contact_button.clicked.connect(self._admin_delete_contact)
+        contact_header_row.addWidget(delete_contact_button, 0)
+        self._admin_contact_delete_button = delete_contact_button
+
+        contact_form_layout.addWidget(contact_header_bar, 0)
+
+        contact_details_row = QHBoxLayout()
+        contact_details_row.setContentsMargins(0, 0, 0, 0)
+        contact_details_row.setSpacing(8)
+
+        contact_details_label = QLabel("Contact Details", contact_form)
+        contact_details_label.setObjectName("AdminSectionTitle")
+        contact_details_row.addWidget(contact_details_label, 0)
+
+        contact_dirty_bubble = QLabel("Empty", contact_form)
+        contact_dirty_bubble.setObjectName("AdminDirtyBubble")
+        contact_dirty_bubble.setProperty("dirtyState", "empty")
+        contact_dirty_bubble.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        contact_dirty_bubble.setMinimumWidth(92)
+        contact_dirty_bubble.setMinimumHeight(24)
+        contact_details_row.addWidget(contact_dirty_bubble, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._admin_contact_dirty_bubble = contact_dirty_bubble
+
+        contact_details_row.addStretch(1)
+        contact_form_layout.addLayout(contact_details_row)
+
+        self._admin_contact_field_shells = []
+        contact_fields = QFormLayout()
+        contact_fields.setContentsMargins(0, 0, 0, 0)
+        contact_fields.setHorizontalSpacing(10)
+        contact_fields.setVerticalSpacing(8)
+
+        self._admin_contact_name_input = QLineEdit(contact_form)
+        self._admin_contact_name_input.setObjectName("PermitFormInput")
+        self._admin_contact_name_input.setPlaceholderText("Full name")
+        self._admin_contact_name_input.textChanged.connect(self._on_admin_contact_form_changed)
+        self._admin_contact_name_input.returnPressed.connect(self._admin_save_contact)
+        contact_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Name",
+                field_widget=self._admin_contact_name_input,
+                parent=contact_form,
+                shell_bucket=self._admin_contact_field_shells,
+            ),
+        )
+
+        self._admin_contact_roles_input = QLineEdit(contact_form)
+        self._admin_contact_roles_input.setObjectName("PermitFormInput")
+        self._admin_contact_roles_input.setPlaceholderText("client, contractor, owner...")
+        self._admin_contact_roles_input.textChanged.connect(self._on_admin_contact_form_changed)
+        self._admin_contact_roles_input.returnPressed.connect(self._admin_save_contact)
+        contact_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Roles",
+                field_widget=self._admin_contact_roles_input,
+                parent=contact_form,
+                shell_bucket=self._admin_contact_field_shells,
+            ),
+        )
+        contact_form_layout.addLayout(contact_fields)
+
+        methods_label = QLabel("Email + Number Bundles (0)", contact_form)
+        methods_label.setObjectName("AdminSectionTitle")
+        contact_form_layout.addWidget(methods_label, 0)
+        self._admin_contact_methods_label = methods_label
+
+        methods_hint = QLabel(
+            "Group emails and numbers by context so teams know which channel to use.",
+            contact_form,
+        )
+        methods_hint.setObjectName("AdminSectionHint")
+        methods_hint.setWordWrap(True)
+        contact_form_layout.addWidget(methods_hint, 0)
+
+        contact_method_actions = QHBoxLayout()
+        contact_method_actions.setContentsMargins(0, 0, 0, 0)
+        contact_method_actions.setSpacing(8)
+
+        add_method_button = QPushButton("Add Bundle", contact_form)
+        add_method_button.setObjectName("TrackerPanelActionButton")
+        add_method_button.setProperty("bundleAction", "update")
+        add_method_button.setProperty("bundleEditing", "false")
+        add_method_button.setMinimumHeight(30)
+        add_method_button.setMinimumWidth(108)
+        add_method_button.clicked.connect(self._admin_add_contact_method_bundle)
+        contact_method_actions.addWidget(add_method_button, 0)
+        self._admin_contact_add_method_button = add_method_button
+
+        cancel_edit_bundle_button = QPushButton("Cancel Edit", contact_form)
+        cancel_edit_bundle_button.setObjectName("TrackerPanelActionButton")
+        cancel_edit_bundle_button.setProperty("bundleAction", "cancel")
+        cancel_edit_bundle_button.setProperty("bundleEditing", "false")
+        cancel_edit_bundle_button.setMinimumHeight(30)
+        cancel_edit_bundle_button.setMinimumWidth(108)
+        cancel_edit_bundle_button.clicked.connect(self._admin_cancel_contact_method_edit)
+        cancel_edit_bundle_button.hide()
+        contact_method_actions.addWidget(cancel_edit_bundle_button, 0)
+        self._admin_contact_cancel_method_button = cancel_edit_bundle_button
+
+        bundle_toggle_button = QPushButton(">", contact_form)
+        bundle_toggle_button.setObjectName("TrackerPanelActionButton")
+        bundle_toggle_button.setFixedSize(34, 30)
+        bundle_toggle_button.clicked.connect(self._toggle_admin_contact_bundle_fields)
+        contact_method_actions.addWidget(bundle_toggle_button, 0)
+        self._admin_contact_bundle_toggle_button = bundle_toggle_button
+
+        contact_method_actions.addStretch(1)
+        contact_form_layout.addLayout(contact_method_actions)
+
+        contact_bundle_fields_host = QWidget(contact_form)
+        contact_bundle_fields_host.setMaximumHeight(0)
+        contact_form_layout.addWidget(contact_bundle_fields_host, 0)
+        self._admin_contact_bundle_fields_host = contact_bundle_fields_host
+
+        contact_bundle_fields = QFormLayout(contact_bundle_fields_host)
+        contact_bundle_fields.setContentsMargins(0, 0, 0, 0)
+        contact_bundle_fields.setHorizontalSpacing(10)
+        contact_bundle_fields.setVerticalSpacing(8)
+
+        self._admin_contact_bundle_name_input = QLineEdit(contact_bundle_fields_host)
+        self._admin_contact_bundle_name_input.setObjectName("PermitFormInput")
+        self._admin_contact_bundle_name_input.setPlaceholderText("Office, permit desk, after-hours...")
+        self._admin_contact_bundle_name_input.textChanged.connect(self._on_admin_contact_form_changed)
+        self._admin_contact_bundle_name_input.returnPressed.connect(self._admin_add_contact_method_bundle)
+        contact_bundle_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Bundle Name",
+                field_widget=self._admin_contact_bundle_name_input,
+                parent=contact_bundle_fields_host,
+                shell_bucket=self._admin_contact_field_shells,
+            ),
+        )
+
+        self._admin_contact_numbers_input = QLineEdit(contact_bundle_fields_host)
+        self._admin_contact_numbers_input.setObjectName("PermitFormInput")
+        self._admin_contact_numbers_input.setPlaceholderText("comma/semicolon-separated")
+        self._admin_contact_numbers_input.textChanged.connect(self._on_admin_contact_form_changed)
+        self._admin_contact_numbers_input.returnPressed.connect(self._admin_add_contact_method_bundle)
+        contact_bundle_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Bundle Number(s)",
+                field_widget=self._admin_contact_numbers_input,
+                parent=contact_bundle_fields_host,
+                shell_bucket=self._admin_contact_field_shells,
+            ),
+        )
+
+        self._admin_contact_emails_input = QLineEdit(contact_bundle_fields_host)
+        self._admin_contact_emails_input.setObjectName("PermitFormInput")
+        self._admin_contact_emails_input.setPlaceholderText("comma/semicolon-separated")
+        self._admin_contact_emails_input.textChanged.connect(self._on_admin_contact_form_changed)
+        self._admin_contact_emails_input.returnPressed.connect(self._admin_add_contact_method_bundle)
+        contact_bundle_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Bundle Email(s)",
+                field_widget=self._admin_contact_emails_input,
+                parent=contact_bundle_fields_host,
+                shell_bucket=self._admin_contact_field_shells,
+            ),
+        )
+
+        self._admin_contact_note_input = QLineEdit(contact_bundle_fields_host)
+        self._admin_contact_note_input.setObjectName("PermitFormInput")
+        self._admin_contact_note_input.setPlaceholderText("note for this bundle (office, permit desk, after-hours...)")
+        self._admin_contact_note_input.textChanged.connect(self._on_admin_contact_form_changed)
+        self._admin_contact_note_input.returnPressed.connect(self._admin_add_contact_method_bundle)
+        contact_bundle_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Bundle Note",
+                field_widget=self._admin_contact_note_input,
+                parent=contact_bundle_fields_host,
+                shell_bucket=self._admin_contact_field_shells,
+            ),
+        )
+
+        bundle_animation = QPropertyAnimation(contact_bundle_fields_host, b"maximumHeight", contact_bundle_fields_host)
+        bundle_animation.setDuration(170)
+        bundle_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._admin_contact_bundle_fields_animation = bundle_animation
+        self._set_admin_contact_bundle_fields_open(False, animate=False)
+        self._sync_admin_contact_bundle_action_state()
+
+        contact_methods_host = QWidget(contact_form)
+        contact_methods_host.setObjectName("AttachedContactsHost")
+        contact_methods_layout = QVBoxLayout(contact_methods_host)
+        contact_methods_layout.setContentsMargins(0, 0, 0, 0)
+        contact_methods_layout.setSpacing(6)
+        self._admin_contact_methods_host = contact_methods_host
+        contact_form_layout.addWidget(contact_methods_host, 1)
+
+        contact_color_picker = self._build_admin_color_picker_widget(
+            parent=contact_form,
+            entity_kind="contact",
+        )
+        self._admin_contact_color_picker_host = contact_color_picker
+        contact_color_shell = self._build_admin_input_shell(
+            label_text="List Color Picker",
+            field_widget=contact_color_picker,
+            parent=contact_form,
+            shell_bucket=None,
+            field_stretch=0,
+            left_align_field=True,
+        )
+        self._admin_contact_color_shell = contact_color_shell
+        contact_form_layout.addWidget(contact_color_shell, 0, Qt.AlignmentFlag.AlignLeft)
+
+        contact_right_layout.addStretch(15)
+        contact_scroll.setWidget(contact_form)
+        contact_right_layout.addWidget(contact_scroll, 70)
+        contact_right_layout.addStretch(15)
+        contact_layout.addWidget(contact_right_host, 3)
+
+        jurisdiction_tab = QWidget(tabs)
+        jurisdiction_layout = QHBoxLayout(jurisdiction_tab)
+        jurisdiction_layout.setContentsMargins(0, 0, 0, 0)
+        jurisdiction_layout.setSpacing(14)
+
+        jurisdiction_left_card = QFrame(jurisdiction_tab)
+        jurisdiction_left_card.setObjectName("AdminListPane")
+        jurisdiction_left = QVBoxLayout(jurisdiction_left_card)
+        jurisdiction_left.setContentsMargins(12, 12, 12, 12)
+        jurisdiction_left.setSpacing(10)
+
+        jurisdictions_title = QLabel("Jurisdictions Directory", jurisdiction_left_card)
+        jurisdictions_title.setObjectName("AdminListTitleChip")
+        jurisdiction_left.addWidget(jurisdictions_title, 0)
+
+        jurisdictions_hint = QLabel(
+            "Keep permitting authorities organized and attach the right contacts to each one.",
+            jurisdiction_left_card,
+        )
+        jurisdictions_hint.setObjectName("AdminSectionHint")
+        jurisdictions_hint.setWordWrap(True)
+        jurisdiction_left.addWidget(jurisdictions_hint, 0)
+
+        jurisdictions_search = QLineEdit(jurisdiction_left_card)
+        jurisdictions_search.setObjectName("TrackerPanelSearch")
+        jurisdictions_search.setPlaceholderText("Search jurisdictions (name, type, portal, contact)")
+        jurisdictions_search.setClearButtonEnabled(True)
+        jurisdictions_search.textChanged.connect(self._on_admin_jurisdictions_search_changed)
+        jurisdiction_left.addWidget(jurisdictions_search, 0)
+        self._admin_jurisdictions_search_input = jurisdictions_search
+
+        add_jurisdiction_button = QPushButton("Add New Jurisdiction", jurisdiction_left_card)
+        add_jurisdiction_button.setObjectName("TrackerPanelActionButton")
+        add_jurisdiction_button.setProperty("adminPrimaryCta", "true")
+        add_jurisdiction_button.setMinimumHeight(34)
+        add_jurisdiction_button.clicked.connect(self._on_admin_add_new_jurisdiction_clicked)
+        jurisdiction_left.addWidget(add_jurisdiction_button, 0)
+
+        jurisdictions_count_label = QLabel("0 jurisdictions", jurisdiction_left_card)
+        jurisdictions_count_label.setObjectName("TrackerPanelMeta")
+        jurisdiction_left.addWidget(jurisdictions_count_label, 0)
+        self._admin_jurisdictions_count_label = jurisdictions_count_label
+
+        jurisdictions_list_host = QWidget(jurisdiction_left_card)
+        jurisdictions_list_stack = QStackedLayout(jurisdictions_list_host)
+        jurisdictions_list_stack.setContentsMargins(0, 0, 0, 0)
+        jurisdictions_list_stack.setSpacing(0)
+
+        jurisdictions_list = QListWidget(jurisdictions_list_host)
+        jurisdictions_list.setObjectName("TrackerPanelList")
+        jurisdictions_list.setWordWrap(True)
+        jurisdictions_list.setSpacing(6)
+        jurisdictions_list.itemSelectionChanged.connect(self._on_admin_jurisdiction_selected)
+        jurisdictions_list_stack.addWidget(jurisdictions_list)
+        self._admin_jurisdictions_list_widget = jurisdictions_list
+
+        jurisdictions_empty_label = QLabel(
+            "No jurisdictions yet.\nUse Add New Jurisdiction to get started.",
+            jurisdictions_list_host,
+        )
+        jurisdictions_empty_label.setObjectName("AdminListEmptyState")
+        jurisdictions_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        jurisdictions_empty_label.setWordWrap(True)
+        jurisdictions_list_stack.addWidget(jurisdictions_empty_label)
+        self._admin_jurisdictions_empty_label = jurisdictions_empty_label
+        self._admin_jurisdictions_list_stack = jurisdictions_list_stack
+
+        jurisdiction_left.addWidget(jurisdictions_list_host, 1)
+        jurisdiction_layout.addWidget(jurisdiction_left_card, 1)
+
+        jurisdiction_right_host = QWidget(jurisdiction_tab)
+        jurisdiction_right_layout = QHBoxLayout(jurisdiction_right_host)
+        jurisdiction_right_layout.setContentsMargins(0, 0, 0, 0)
+        jurisdiction_right_layout.setSpacing(0)
+
+        jurisdiction_scroll = EdgeLockedScrollArea(jurisdiction_right_host)
+        jurisdiction_scroll.setObjectName("AdminEditorScroll")
+        jurisdiction_scroll.setWidgetResizable(True)
+        jurisdiction_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        jurisdiction_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        jurisdiction_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        jurisdiction_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        jurisdiction_scroll.viewport().setAutoFillBackground(False)
+        jurisdiction_scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+
+        jurisdiction_form = QFrame(jurisdiction_scroll)
+        jurisdiction_form.setObjectName("PermitFormCard")
+        jurisdiction_form.setProperty("adminForm", "true")
+        jurisdiction_form.setMinimumWidth(540)
+        self._admin_jurisdiction_form_widget = jurisdiction_form
+        jurisdiction_form_layout = QVBoxLayout(jurisdiction_form)
+        jurisdiction_form_layout.setContentsMargins(14, 14, 14, 14)
+        jurisdiction_form_layout.setSpacing(11)
+
+        jurisdiction_header_bar = QFrame(jurisdiction_form)
+        jurisdiction_header_bar.setObjectName("AdminHeaderBar")
+        jurisdiction_header_row = QHBoxLayout(jurisdiction_header_bar)
+        jurisdiction_header_row.setContentsMargins(10, 8, 10, 8)
+        jurisdiction_header_row.setSpacing(8)
+
+        jurisdiction_mode_label = QLabel("Adding New Jurisdiction", jurisdiction_form)
+        jurisdiction_mode_label.setObjectName("AdminModeTitle")
+        jurisdiction_header_row.addWidget(jurisdiction_mode_label, 0)
+        self._admin_jurisdiction_mode_label = jurisdiction_mode_label
+
+        jurisdiction_header_row.addStretch(1)
+
+        save_jurisdiction_button = QPushButton("Create Jurisdiction", jurisdiction_form)
+        save_jurisdiction_button.setObjectName("TrackerPanelActionButton")
+        save_jurisdiction_button.setProperty("adminPrimaryCta", "true")
+        save_jurisdiction_button.setMinimumHeight(32)
+        save_jurisdiction_button.clicked.connect(self._admin_save_jurisdiction)
+        jurisdiction_header_row.addWidget(save_jurisdiction_button, 0)
+        self._admin_jurisdiction_save_button = save_jurisdiction_button
+
+        delete_jurisdiction_button = QPushButton("Delete Jurisdiction", jurisdiction_form)
+        delete_jurisdiction_button.setObjectName("PermitFormDangerButton")
+        delete_jurisdiction_button.setMinimumHeight(32)
+        delete_jurisdiction_button.clicked.connect(self._admin_delete_jurisdiction)
+        jurisdiction_header_row.addWidget(delete_jurisdiction_button, 0)
+        self._admin_jurisdiction_delete_button = delete_jurisdiction_button
+
+        jurisdiction_form_layout.addWidget(jurisdiction_header_bar, 0)
+
+        jurisdiction_details_row = QHBoxLayout()
+        jurisdiction_details_row.setContentsMargins(0, 0, 0, 0)
+        jurisdiction_details_row.setSpacing(8)
+
+        jurisdiction_details_label = QLabel("Jurisdiction Details", jurisdiction_form)
+        jurisdiction_details_label.setObjectName("AdminSectionTitle")
+        jurisdiction_details_row.addWidget(jurisdiction_details_label, 0)
+
+        jurisdiction_dirty_bubble = QLabel("Empty", jurisdiction_form)
+        jurisdiction_dirty_bubble.setObjectName("AdminDirtyBubble")
+        jurisdiction_dirty_bubble.setProperty("dirtyState", "empty")
+        jurisdiction_dirty_bubble.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        jurisdiction_dirty_bubble.setMinimumWidth(92)
+        jurisdiction_dirty_bubble.setMinimumHeight(24)
+        jurisdiction_details_row.addWidget(jurisdiction_dirty_bubble, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._admin_jurisdiction_dirty_bubble = jurisdiction_dirty_bubble
+
+        jurisdiction_details_row.addStretch(1)
+        jurisdiction_form_layout.addLayout(jurisdiction_details_row)
+
+        self._admin_jurisdiction_field_shells = []
+        jurisdiction_details_split_row = QHBoxLayout()
+        jurisdiction_details_split_row.setContentsMargins(0, 0, 0, 0)
+        jurisdiction_details_split_row.setSpacing(12)
+
+        jurisdiction_fields_host = QWidget(jurisdiction_form)
+        jurisdiction_fields_host_layout = QVBoxLayout(jurisdiction_fields_host)
+        jurisdiction_fields_host_layout.setContentsMargins(0, 0, 0, 0)
+        jurisdiction_fields_host_layout.setSpacing(0)
+        self._admin_jurisdiction_fields_host = jurisdiction_fields_host
+
+        jurisdiction_fields = QFormLayout()
+        jurisdiction_fields.setContentsMargins(0, 0, 0, 0)
+        jurisdiction_fields.setHorizontalSpacing(10)
+        jurisdiction_fields.setVerticalSpacing(8)
+
+        self._admin_jurisdiction_name_input = QLineEdit(jurisdiction_form)
+        self._admin_jurisdiction_name_input.setObjectName("PermitFormInput")
+        self._admin_jurisdiction_name_input.setPlaceholderText("City of ... / County of ...")
+        self._admin_jurisdiction_name_input.textChanged.connect(self._on_admin_jurisdiction_form_changed)
+        self._admin_jurisdiction_name_input.returnPressed.connect(self._admin_save_jurisdiction)
+        jurisdiction_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Name",
+                field_widget=self._admin_jurisdiction_name_input,
+                parent=jurisdiction_form,
+                shell_bucket=self._admin_jurisdiction_field_shells,
+            ),
+        )
+
+        self._admin_jurisdiction_type_combo = QComboBox(jurisdiction_form)
+        self._admin_jurisdiction_type_combo.setObjectName("PermitFormCombo")
+        self._admin_jurisdiction_type_combo.addItem("City", "city")
+        self._admin_jurisdiction_type_combo.addItem("County", "county")
+        self._admin_jurisdiction_type_combo.currentIndexChanged.connect(
+            self._on_admin_jurisdiction_form_changed
+        )
+        jurisdiction_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Type",
+                field_widget=self._admin_jurisdiction_type_combo,
+                parent=jurisdiction_form,
+                shell_bucket=self._admin_jurisdiction_field_shells,
+            ),
+        )
+
+        self._admin_jurisdiction_parent_input = QLineEdit(jurisdiction_form)
+        self._admin_jurisdiction_parent_input.setObjectName("PermitFormInput")
+        self._admin_jurisdiction_parent_input.setPlaceholderText("Optional (usually for city jurisdictions)")
+        self._admin_jurisdiction_parent_input.textChanged.connect(self._on_admin_jurisdiction_form_changed)
+        jurisdiction_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Parent County (Optional)",
+                field_widget=self._admin_jurisdiction_parent_input,
+                parent=jurisdiction_form,
+                shell_bucket=self._admin_jurisdiction_field_shells,
+            ),
+        )
+
+        self._admin_jurisdiction_portals_input = QLineEdit(jurisdiction_form)
+        self._admin_jurisdiction_portals_input.setObjectName("PermitFormInput")
+        self._admin_jurisdiction_portals_input.setPlaceholderText("comma-separated URLs")
+        self._admin_jurisdiction_portals_input.textChanged.connect(self._on_admin_jurisdiction_form_changed)
+        jurisdiction_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Portal URLs",
+                field_widget=self._admin_jurisdiction_portals_input,
+                parent=jurisdiction_form,
+                shell_bucket=self._admin_jurisdiction_field_shells,
+            ),
+        )
+
+        self._admin_jurisdiction_vendor_input = QLineEdit(jurisdiction_form)
+        self._admin_jurisdiction_vendor_input.setObjectName("PermitFormInput")
+        self._admin_jurisdiction_vendor_input.setPlaceholderText("accela, click2gov, other")
+        self._admin_jurisdiction_vendor_input.textChanged.connect(self._on_admin_jurisdiction_form_changed)
+        jurisdiction_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Portal Vendor",
+                field_widget=self._admin_jurisdiction_vendor_input,
+                parent=jurisdiction_form,
+                shell_bucket=self._admin_jurisdiction_field_shells,
+            ),
+        )
+
+        self._admin_jurisdiction_notes_input = QLineEdit(jurisdiction_form)
+        self._admin_jurisdiction_notes_input.setObjectName("PermitFormInput")
+        self._admin_jurisdiction_notes_input.setPlaceholderText("Internal notes for this jurisdiction")
+        self._admin_jurisdiction_notes_input.textChanged.connect(self._on_admin_jurisdiction_form_changed)
+        jurisdiction_fields.addRow(
+            self._build_admin_input_shell(
+                label_text="Notes",
+                field_widget=self._admin_jurisdiction_notes_input,
+                parent=jurisdiction_form,
+                shell_bucket=self._admin_jurisdiction_field_shells,
+            ),
+        )
+        jurisdiction_fields_host_layout.addLayout(jurisdiction_fields)
+        jurisdiction_fields_host_layout.addStretch(1)
+        jurisdiction_details_split_row.addWidget(jurisdiction_fields_host, 1)
+
+        attached_panel = QFrame(jurisdiction_form)
+        attached_panel.setObjectName("AdminAttachedContactsPane")
+        attached_panel_layout = QVBoxLayout(attached_panel)
+        attached_panel_layout.setContentsMargins(10, 10, 10, 10)
+        attached_panel_layout.setSpacing(8)
+        self._admin_jurisdiction_attached_panel = attached_panel
+
+        attached_label = QLabel("Attached Contacts (0)", attached_panel)
+        attached_label.setObjectName("AdminSectionTitle")
+        attached_panel_layout.addWidget(attached_label, 0)
+        self._admin_jurisdiction_attached_label = attached_label
+
+        attached_hint = QLabel(
+            "Attach as many contacts as needed. Each card shows every saved bundle for quick lookup.",
+            attached_panel,
+        )
+        attached_hint.setObjectName("AdminSectionHint")
+        attached_hint.setWordWrap(True)
+        attached_panel_layout.addWidget(attached_hint, 0)
+
+        attached_picker_host = QWidget(attached_panel)
+        attached_picker_host.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        attached_picker_row = QHBoxLayout(attached_picker_host)
+        attached_picker_row.setContentsMargins(0, 0, 0, 0)
+        attached_picker_row.setSpacing(8)
+        attached_picker_row.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        add_attached_contact_button = QPushButton("Add", attached_picker_host)
+        add_attached_contact_button.setObjectName("TrackerPanelActionButton")
+        add_attached_contact_button.setFixedSize(108, 30)
+        add_attached_contact_button.clicked.connect(self._admin_add_jurisdiction_contact)
+        attached_picker_row.addWidget(add_attached_contact_button, 0)
+        self._admin_jurisdiction_contact_add_button = add_attached_contact_button
+
+        contact_picker_combo = QComboBox(attached_picker_host)
+        contact_picker_combo.setObjectName("PermitFormCombo")
+        contact_picker_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        contact_picker_combo.addItem("Select contact to attach...", "")
+        attached_picker_row.addWidget(contact_picker_combo, 1)
+        self._admin_jurisdiction_contact_picker_combo = contact_picker_combo
+
+        attached_picker_row.addStretch(1)
+        self._admin_jurisdiction_attached_picker_host = attached_picker_host
+        attached_panel_layout.addWidget(attached_picker_host, 0, Qt.AlignmentFlag.AlignLeft)
+
+        attached_contacts_host = QWidget(attached_panel)
+        attached_contacts_host.setObjectName("AttachedContactsHost")
+        attached_contacts_layout = QVBoxLayout(attached_contacts_host)
+        attached_contacts_layout.setContentsMargins(0, 0, 0, 0)
+        attached_contacts_layout.setSpacing(6)
+        self._admin_jurisdiction_attached_contacts_host = attached_contacts_host
+        attached_panel_layout.addWidget(attached_contacts_host, 1)
+
+        jurisdiction_details_split_row.addWidget(attached_panel, 1)
+        jurisdiction_form_layout.addLayout(jurisdiction_details_split_row, 1)
+
+        jurisdiction_color_picker = self._build_admin_color_picker_widget(
+            parent=jurisdiction_form,
+            entity_kind="jurisdiction",
+        )
+        self._admin_jurisdiction_color_picker_host = jurisdiction_color_picker
+        jurisdiction_color_shell = self._build_admin_input_shell(
+            label_text="List Color Picker",
+            field_widget=jurisdiction_color_picker,
+            parent=jurisdiction_form,
+            shell_bucket=None,
+            field_stretch=0,
+            left_align_field=True,
+        )
+        self._admin_jurisdiction_color_shell = jurisdiction_color_shell
+        jurisdiction_form_layout.addWidget(jurisdiction_color_shell, 0, Qt.AlignmentFlag.AlignLeft)
+
+        jurisdiction_right_layout.addStretch(15)
+        jurisdiction_scroll.setWidget(jurisdiction_form)
+        jurisdiction_right_layout.addWidget(jurisdiction_scroll, 70)
+        jurisdiction_right_layout.addStretch(15)
+        jurisdiction_layout.addWidget(jurisdiction_right_host, 3)
+
+        tabs.addTab(contact_tab, "Contacts")
+        tabs.addTab(jurisdiction_tab, "Jurisdictions")
+        templates_tab = self._build_document_templates_view(tabs, as_tab=True)
+        self._admin_templates_tab_index = tabs.addTab(templates_tab, "Document Templates")
+        return view
+
+    def _open_contacts_and_jurisdictions_dialog(self, *, preferred_tab: str = "contacts") -> None:
+        if self._panel_stack is None or self._panel_admin_view is None:
+            return
+        tab_key = str(preferred_tab or "").strip().casefold()
+        action_label = "Open Document Templates" if tab_key == "templates" else "Open Admin Panel"
+        if not self._confirm_discard_template_changes(action_label=action_label):
+            return
+        if not self._confirm_discard_inline_form_changes(action_label=action_label):
+            return
+        self._refresh_admin_views()
+        self._refresh_document_templates_view()
+        tabs = self._admin_tabs
+        if tabs is not None:
+            if tab_key == "jurisdictions":
+                tabs.setCurrentIndex(1 if tabs.count() > 1 else 0)
+            elif tab_key == "templates" and self._admin_templates_tab_index >= 0:
+                tabs.setCurrentIndex(self._admin_templates_tab_index)
+            else:
+                tabs.setCurrentIndex(0)
+        self._panel_stack.setCurrentWidget(self._panel_admin_view)
+        self._sync_foreground_layout()
+
+    def _close_contacts_and_jurisdictions_view(self) -> None:
+        if self._panel_stack is None or self._panel_home_view is None:
+            return
+        if not self._confirm_discard_admin_view_changes(action_label="Back to Tracker"):
+            return
+        self._panel_stack.setCurrentWidget(self._panel_home_view)
+        self._refresh_all_views()
+        self._sync_foreground_layout()
+
+    def _refresh_admin_views(self) -> None:
+        if self._admin_contacts_list_widget is None or self._admin_jurisdictions_list_widget is None:
+            return
+        self._refresh_admin_contacts_list(select_id=self._admin_selected_contact_id)
+        self._refresh_admin_jurisdictions_list(select_id=self._admin_selected_jurisdiction_id)
+        selected_jurisdiction = self._jurisdiction_by_id(self._admin_selected_jurisdiction_id)
+        if selected_jurisdiction is None:
+            self._refresh_admin_jurisdiction_contacts_picker(
+                selected_ids=self._admin_jurisdiction_attached_contact_ids
+            )
+        else:
+            self._refresh_admin_jurisdiction_contacts_picker(selected_ids=selected_jurisdiction.contact_ids)
+        self._admin_set_contact_form_mode(
+            editing=self._contact_by_id(self._admin_selected_contact_id) is not None
+        )
+        self._admin_set_jurisdiction_form_mode(
+            editing=self._jurisdiction_by_id(self._admin_selected_jurisdiction_id) is not None
+        )
+        self._set_admin_contact_bundle_fields_open(
+            self._admin_contact_bundle_fields_open,
+            animate=False,
+        )
+        self._refresh_admin_contact_methods_list()
+        self._sync_admin_contact_dirty_state()
+        self._sync_admin_jurisdiction_dirty_state()
+        self._sync_admin_editor_field_widths()
+
+    def _set_widget_max_width(self, widget: QWidget | None, width: int, *, min_width: int = 220) -> None:
+        if widget is None:
+            return
+        widget.setMaximumWidth(max(int(min_width), int(width)))
+
+    def _list_item_size_hint_for_card(self, card: QWidget) -> object:
+        hint = card.sizeHint()
+
+        min_width = max(0, int(card.minimumWidth()))
+        if min_width > 0:
+            hint.setWidth(max(hint.width(), min_width))
+        max_width = int(card.maximumWidth())
+        if 0 < max_width < 16777215:
+            hint.setWidth(min(hint.width(), max_width))
+
+        min_height = max(0, int(card.minimumHeight()))
+        if min_height > 0:
+            hint.setHeight(max(hint.height(), min_height))
+        max_height = int(card.maximumHeight())
+        if 0 < max_height < 16777215:
+            hint.setHeight(min(hint.height(), max_height))
+
+        return hint
+
+    def _sync_admin_editor_field_widths(self) -> None:
+        contact_form = self._admin_contact_form_widget
+        if contact_form is not None and contact_form.width() > 0:
+            contact_half = max(280, int(contact_form.width() * 0.75))
+            contact_quarter = max(96, int(contact_form.width() * 0.25))
+            contact_color_shell_width = max(240, contact_quarter + 156)
+            for shell in self._admin_contact_field_shells:
+                self._set_widget_max_width(shell, contact_half)
+            self._set_widget_max_width(self._admin_contact_name_input, contact_half)
+            self._set_widget_max_width(self._admin_contact_roles_input, contact_half)
+            self._set_widget_max_width(self._admin_contact_bundle_fields_host, contact_half)
+            self._set_widget_max_width(self._admin_contact_methods_host, contact_half)
+            self._set_widget_max_width(
+                self._admin_contact_color_shell,
+                contact_color_shell_width,
+                min_width=240,
+            )
+            self._set_widget_max_width(
+                self._admin_contact_color_picker_host,
+                contact_quarter,
+                min_width=96,
+            )
+            self._set_admin_entity_color_picker_open(
+                "contact",
+                self._admin_contact_color_picker_open,
+                animate=False,
+            )
+
+        jurisdiction_form = self._admin_jurisdiction_form_widget
+        if jurisdiction_form is not None and jurisdiction_form.width() > 0:
+            jurisdiction_half = max(260, int(jurisdiction_form.width() * 0.5))
+            jurisdiction_quarter = max(96, int(jurisdiction_form.width() * 0.25))
+            jurisdiction_color_shell_width = max(240, jurisdiction_quarter + 156)
+            for shell in self._admin_jurisdiction_field_shells:
+                self._set_widget_max_width(shell, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_name_input, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_type_combo, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_parent_input, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_portals_input, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_vendor_input, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_notes_input, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_fields_host, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_attached_panel, jurisdiction_half)
+            add_button_width = 0
+            if self._admin_jurisdiction_contact_add_button is not None:
+                add_button_width = self._admin_jurisdiction_contact_add_button.width() or 48
+            picker_width = max(180, jurisdiction_half - add_button_width - 12)
+            self._set_widget_max_width(self._admin_jurisdiction_contact_picker_combo, picker_width)
+            self._set_widget_max_width(self._admin_jurisdiction_attached_picker_host, jurisdiction_half)
+            self._set_widget_max_width(self._admin_jurisdiction_attached_contacts_host, jurisdiction_half)
+            self._set_widget_max_width(
+                self._admin_jurisdiction_color_shell,
+                jurisdiction_color_shell_width,
+                min_width=240,
+            )
+            self._set_widget_max_width(
+                self._admin_jurisdiction_color_picker_host,
+                jurisdiction_quarter,
+                min_width=96,
+            )
+            self._set_admin_entity_color_picker_open(
+                "jurisdiction",
+                self._admin_jurisdiction_color_picker_open,
+                animate=False,
+            )
+
+        template_form = self._template_form_widget
+        if template_form is not None and template_form.width() > 0:
+            template_half = max(280, int(template_form.width() * 0.75))
+            for shell in self._template_field_shells:
+                self._set_widget_max_width(shell, template_half)
+            self._set_widget_max_width(self._template_name_input, template_half)
+            self._set_widget_max_width(self._template_type_combo, template_half)
+            self._set_widget_max_width(self._template_notes_input, template_half)
+            self._set_widget_max_width(self._template_slot_label_input, template_half)
+            self._set_widget_max_width(self._template_slot_required_combo, template_half)
+            self._set_widget_max_width(self._template_slots_list_widget, template_half)
+
+    def _contact_method_rows_snapshot(
+        self, rows: Sequence[ContactMethodRecord]
+    ) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...], str], ...]:
+        snapshot_rows: list[tuple[str, tuple[str, ...], tuple[str, ...], str]] = []
+        for row in rows:
+            label = str(row.label or "").strip()
+            emails = tuple(_parse_multi_values(_join_multi_values(row.emails)))
+            numbers = tuple(_parse_multi_values(_join_multi_values(row.numbers)))
+            note = str(row.note or "").strip()
+            if not any((label, emails, numbers, note)):
+                continue
+            snapshot_rows.append((label, emails, numbers, note))
+        return tuple(snapshot_rows)
+
+    def _admin_contact_form_snapshot(self) -> tuple[object, ...]:
+        name = self._admin_contact_name_input.text().strip() if self._admin_contact_name_input else ""
+        roles = (
+            tuple(_parse_multi_values(self._admin_contact_roles_input.text()))
+            if self._admin_contact_roles_input
+            else tuple()
+        )
+        pending_numbers = (
+            tuple(_parse_multi_values(self._admin_contact_numbers_input.text()))
+            if self._admin_contact_numbers_input
+            else tuple()
+        )
+        pending_emails = (
+            tuple(_parse_multi_values(self._admin_contact_emails_input.text()))
+            if self._admin_contact_emails_input
+            else tuple()
+        )
+        pending_label = (
+            self._admin_contact_bundle_name_input.text().strip()
+            if self._admin_contact_bundle_name_input
+            else ""
+        )
+        pending_note = self._admin_contact_note_input.text().strip() if self._admin_contact_note_input else ""
+        methods = self._contact_method_rows_snapshot(self._admin_contact_method_rows)
+        list_color = normalize_list_color(self._admin_contact_list_color)
+        return (
+            name,
+            roles,
+            methods,
+            pending_label,
+            pending_numbers,
+            pending_emails,
+            pending_note,
+            self._admin_contact_editing_bundle_index,
+            list_color,
+        )
+
+    def _admin_jurisdiction_form_snapshot(self) -> tuple[object, ...]:
+        name = (
+            self._admin_jurisdiction_name_input.text().strip()
+            if self._admin_jurisdiction_name_input is not None
+            else ""
+        )
+        jurisdiction_type = (
+            str(self._admin_jurisdiction_type_combo.currentData() or "city")
+            if self._admin_jurisdiction_type_combo is not None
+            else "city"
+        )
+        parent_county = (
+            self._admin_jurisdiction_parent_input.text().strip()
+            if self._admin_jurisdiction_parent_input is not None
+            else ""
+        )
+        portal_urls = (
+            tuple(_parse_multi_values(self._admin_jurisdiction_portals_input.text()))
+            if self._admin_jurisdiction_portals_input is not None
+            else tuple()
+        )
+        portal_vendor = (
+            self._admin_jurisdiction_vendor_input.text().strip()
+            if self._admin_jurisdiction_vendor_input is not None
+            else ""
+        )
+        notes = (
+            self._admin_jurisdiction_notes_input.text().strip()
+            if self._admin_jurisdiction_notes_input is not None
+            else ""
+        )
+        contact_ids = tuple(sorted(self._admin_selected_jurisdiction_contact_ids()))
+        list_color = normalize_list_color(self._admin_jurisdiction_list_color)
+        return (
+            name,
+            jurisdiction_type,
+            parent_county,
+            portal_urls,
+            portal_vendor,
+            notes,
+            contact_ids,
+            list_color,
+        )
+
+    def _set_admin_contact_dirty(self, dirty: bool) -> None:
+        self._admin_contact_dirty = bool(dirty)
+        self._set_admin_dirty_bubble_state(
+            self._admin_contact_dirty_bubble,
+            state=self._admin_contact_dirty_bubble_state(),
+        )
+        self._admin_set_contact_form_mode(editing=self._admin_contact_editing_mode)
+
+    def _set_admin_jurisdiction_dirty(self, dirty: bool) -> None:
+        self._admin_jurisdiction_dirty = bool(dirty)
+        self._set_admin_dirty_bubble_state(
+            self._admin_jurisdiction_dirty_bubble,
+            state=self._admin_jurisdiction_dirty_bubble_state(),
+        )
+        self._admin_set_jurisdiction_form_mode(editing=self._admin_jurisdiction_editing_mode)
+
+    def _admin_contact_bubble_is_empty(self) -> bool:
+        snapshot = self._admin_contact_form_snapshot()
+        if len(snapshot) < 9:
+            return False
+        name = str(snapshot[0] or "").strip()
+        roles = tuple(snapshot[1]) if isinstance(snapshot[1], tuple) else tuple()
+        methods = tuple(snapshot[2]) if isinstance(snapshot[2], tuple) else tuple()
+        pending_label = str(snapshot[3] or "").strip()
+        pending_numbers = tuple(snapshot[4]) if isinstance(snapshot[4], tuple) else tuple()
+        pending_emails = tuple(snapshot[5]) if isinstance(snapshot[5], tuple) else tuple()
+        pending_note = str(snapshot[6] or "").strip()
+        editing_bundle_index = int(snapshot[7]) if isinstance(snapshot[7], int) else -1
+        list_color = normalize_list_color(snapshot[8] if len(snapshot) >= 9 else "")
+        return not any(
+            (
+                name,
+                roles,
+                methods,
+                pending_label,
+                pending_numbers,
+                pending_emails,
+                pending_note,
+                editing_bundle_index >= 0,
+                list_color,
+            )
+        )
+
+    def _admin_jurisdiction_bubble_is_empty(self) -> bool:
+        snapshot = self._admin_jurisdiction_form_snapshot()
+        if len(snapshot) < 8:
+            return False
+        name = str(snapshot[0] or "").strip()
+        jurisdiction_type = str(snapshot[1] or "").strip().casefold()
+        parent_county = str(snapshot[2] or "").strip()
+        portal_urls = tuple(snapshot[3]) if isinstance(snapshot[3], tuple) else tuple()
+        portal_vendor = str(snapshot[4] or "").strip()
+        notes = str(snapshot[5] or "").strip()
+        contact_ids = tuple(snapshot[6]) if isinstance(snapshot[6], tuple) else tuple()
+        list_color = normalize_list_color(snapshot[7] if len(snapshot) >= 8 else "")
+        return not any(
+            (
+                name,
+                jurisdiction_type not in {"", "city"},
+                parent_county,
+                portal_urls,
+                portal_vendor,
+                notes,
+                contact_ids,
+                list_color,
+            )
+        )
+
+    def _admin_contact_dirty_bubble_state(self) -> str:
+        if self._admin_contact_dirty:
+            return "dirty"
+        if not self._admin_contact_editing_mode and self._admin_contact_bubble_is_empty():
+            return "empty"
+        return "clean"
+
+    def _admin_jurisdiction_dirty_bubble_state(self) -> str:
+        if self._admin_jurisdiction_dirty:
+            return "dirty"
+        if not self._admin_jurisdiction_editing_mode and self._admin_jurisdiction_bubble_is_empty():
+            return "empty"
+        return "clean"
+
+    def _set_admin_dirty_bubble_state(self, bubble: QLabel | None, *, state: str) -> None:
+        if bubble is None:
+            return
+        normalized_state = str(state or "").strip().casefold()
+        if normalized_state not in {"dirty", "clean", "empty"}:
+            normalized_state = "clean"
+        bubble_text = {
+            "dirty": "Unsaved",
+            "clean": "Saved",
+            "empty": "Empty",
+        }.get(normalized_state, "Saved")
+        bubble.setText(bubble_text)
+        bubble.setProperty("dirtyState", normalized_state)
+        style = bubble.style()
+        style.unpolish(bubble)
+        style.polish(bubble)
+        bubble.update()
+
+    def _rebase_admin_contact_dirty_tracking(self) -> None:
+        self._admin_contact_baseline_snapshot = self._admin_contact_form_snapshot()
+        self._set_admin_contact_dirty(False)
+
+    def _rebase_admin_jurisdiction_dirty_tracking(self) -> None:
+        self._admin_jurisdiction_baseline_snapshot = self._admin_jurisdiction_form_snapshot()
+        self._set_admin_jurisdiction_dirty(False)
+
+    def _sync_admin_contact_dirty_state(self) -> None:
+        if self._admin_contact_form_loading:
+            return
+        if not self._admin_contact_baseline_snapshot:
+            self._rebase_admin_contact_dirty_tracking()
+            return
+        self._set_admin_contact_dirty(
+            self._admin_contact_form_snapshot() != self._admin_contact_baseline_snapshot
+        )
+
+    def _sync_admin_jurisdiction_dirty_state(self) -> None:
+        if self._admin_jurisdiction_form_loading:
+            return
+        if not self._admin_jurisdiction_baseline_snapshot:
+            self._rebase_admin_jurisdiction_dirty_tracking()
+            return
+        self._set_admin_jurisdiction_dirty(
+            self._admin_jurisdiction_form_snapshot() != self._admin_jurisdiction_baseline_snapshot
+        )
+
+    def _on_admin_contact_form_changed(self, *_args: object) -> None:
+        self._sync_admin_contact_dirty_state()
+
+    def _on_admin_jurisdiction_form_changed(self, *_args: object) -> None:
+        self._sync_admin_jurisdiction_dirty_state()
+
+    def _on_admin_contacts_search_changed(self, *_args: object) -> None:
+        self._refresh_admin_contacts_list(select_id=self._admin_selected_contact_id)
+
+    def _on_admin_jurisdictions_search_changed(self, *_args: object) -> None:
+        self._refresh_admin_jurisdictions_list(select_id=self._admin_selected_jurisdiction_id)
+
+    def _on_templates_search_changed(self, *_args: object) -> None:
+        self._refresh_templates_list(select_id=self._template_selected_id)
+
+    def _admin_contact_panel_dirty_excluding_bundle_edit(self) -> bool:
+        baseline = self._admin_contact_baseline_snapshot
+        if not baseline:
+            return False
+        current = self._admin_contact_form_snapshot()
+        if not isinstance(current, tuple) or not isinstance(baseline, tuple):
+            return self._admin_contact_dirty and not self._admin_contact_bundle_edit_is_dirty()
+        if len(current) != len(baseline):
+            return self._admin_contact_dirty and not self._admin_contact_bundle_edit_is_dirty()
+        # Ignore bundle-edit buffer fields while editing an existing bundle so the panel
+        # check only tracks true form changes outside that temporary edit state.
+        if self._admin_contact_editing_bundle_index >= 0:
+            normalized_current = list(current)
+            for index in (3, 4, 5, 6, 7):
+                normalized_current[index] = baseline[index]
+            return tuple(normalized_current) != baseline
+        return current != baseline
+
+    def _confirm_discard_admin_contact_panel_changes(self, *, action_label: str) -> bool:
+        if not self._admin_contact_panel_dirty_excluding_bundle_edit():
+            return True
+        return self._confirm_dialog(
+            "Unsaved Contact Changes",
+            (
+                "You have unsaved changes in the contact form. "
+                f"Discard them and continue with '{action_label}'?"
+            ),
+            confirm_text="Discard Changes",
+            cancel_text="Keep Editing",
+            danger=True,
+        )
+
+    def _confirm_discard_admin_view_changes(self, *, action_label: str) -> bool:
+        if not self._confirm_discard_admin_contact_editor_changes(action_label=action_label):
+            return False
+        if not self._confirm_discard_admin_jurisdiction_changes(action_label=action_label):
+            return False
+        if not self._confirm_discard_template_changes(action_label=action_label):
+            return False
+        return True
+
+    def _confirm_discard_admin_contact_editor_changes(self, *, action_label: str) -> bool:
+        if self._admin_contact_bundle_edit_is_dirty():
+            if not self._confirm_discard_admin_contact_bundle_changes(action_label=action_label):
+                return False
+        if not self._confirm_discard_admin_contact_panel_changes(action_label=action_label):
+            return False
+        return True
+
+    def _confirm_discard_admin_contact_changes(self, *, action_label: str) -> bool:
+        if not self._admin_contact_dirty:
+            return True
+        return self._confirm_dialog(
+            "Unsaved Contact Changes",
+            (
+                "You have unsaved changes in the contact form. "
+                f"Discard them and continue with '{action_label}'?"
+            ),
+            confirm_text="Discard Changes",
+            cancel_text="Keep Editing",
+            danger=True,
+        )
+
+    def _confirm_discard_admin_jurisdiction_changes(self, *, action_label: str) -> bool:
+        if not self._admin_jurisdiction_dirty:
+            return True
+        return self._confirm_dialog(
+            "Unsaved Jurisdiction Changes",
+            (
+                "You have unsaved changes in the jurisdiction form. "
+                f"Discard them and continue with '{action_label}'?"
+            ),
+            confirm_text="Discard Changes",
+            cancel_text="Keep Editing",
+            danger=True,
+        )
+
+    def _on_admin_add_new_contact_clicked(self) -> None:
+        self._admin_new_contact(require_confirm=True, action_label="Add New Contact")
+
+    def _on_admin_add_new_jurisdiction_clicked(self) -> None:
+        self._admin_new_jurisdiction(require_confirm=True, action_label="Add New Jurisdiction")
+
+    def _admin_entity_color_values(self, entity_kind: str) -> tuple[str, str]:
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        if normalized_entity == "contact":
+            return (
+                normalize_list_color(self._admin_contact_list_color),
+                normalize_list_color(self._admin_contact_custom_list_color),
+            )
+        if normalized_entity == "property":
+            return (
+                normalize_list_color(self._add_property_list_color),
+                normalize_list_color(self._add_property_custom_list_color),
+            )
+        return (
+            normalize_list_color(self._admin_jurisdiction_list_color),
+            normalize_list_color(self._admin_jurisdiction_custom_list_color),
+        )
+
+    def _admin_set_entity_color_values(self, entity_kind: str, *, selected: str, custom: str) -> None:
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        if normalized_entity == "contact":
+            self._admin_contact_list_color = normalize_list_color(selected)
+            self._admin_contact_custom_list_color = normalize_list_color(custom)
+            return
+        if normalized_entity == "property":
+            self._add_property_list_color = normalize_list_color(selected)
+            self._add_property_custom_list_color = normalize_list_color(custom)
+            return
+        self._admin_jurisdiction_list_color = normalize_list_color(selected)
+        self._admin_jurisdiction_custom_list_color = normalize_list_color(custom)
+
+    def _admin_entity_color_controls(
+        self, entity_kind: str
+    ) -> tuple[dict[str, QPushButton], QPushButton | None, QLabel | None]:
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        if normalized_entity == "contact":
+            return (
+                self._admin_contact_color_buttons,
+                self._admin_contact_custom_color_dot,
+                self._admin_contact_color_selected_label,
+            )
+        if normalized_entity == "property":
+            return (
+                self._add_property_color_buttons,
+                self._add_property_custom_color_dot,
+                self._add_property_color_selected_label,
+            )
+        return (
+            self._admin_jurisdiction_color_buttons,
+            self._admin_jurisdiction_custom_color_dot,
+            self._admin_jurisdiction_color_selected_label,
+        )
+
+    def _admin_entity_color_picker_controls(
+        self, entity_kind: str
+    ) -> tuple[QPushButton | None, QWidget | None, QPropertyAnimation | None]:
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        if normalized_entity == "contact":
+            return (
+                self._admin_contact_color_toggle_button,
+                self._admin_contact_color_content_host,
+                self._admin_contact_color_animation,
+            )
+        if normalized_entity == "property":
+            return (
+                self._add_property_color_toggle_button,
+                self._add_property_color_content_host,
+                self._add_property_color_animation,
+            )
+        return (
+            self._admin_jurisdiction_color_toggle_button,
+            self._admin_jurisdiction_color_content_host,
+            self._admin_jurisdiction_color_animation,
+        )
+
+    def _admin_entity_color_picker_is_open(self, entity_kind: str) -> bool:
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        if normalized_entity == "contact":
+            return bool(self._admin_contact_color_picker_open)
+        if normalized_entity == "property":
+            return bool(self._add_property_color_picker_open)
+        return bool(self._admin_jurisdiction_color_picker_open)
+
+    def _admin_color_picker_content_target_height(self, host: QWidget | None) -> int:
+        if host is None:
+            return 0
+        hint = host.sizeHint().height()
+        if hint <= 0 and host.layout() is not None:
+            hint = host.layout().sizeHint().height()
+        return max(0, hint)
+
+    def _set_admin_entity_color_picker_open(
+        self,
+        entity_kind: str,
+        expanded: bool,
+        *,
+        animate: bool,
+    ) -> None:
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        toggle_button, content_host, animation = self._admin_entity_color_picker_controls(normalized_entity)
+        if content_host is None or toggle_button is None:
+            return
+        target_height = self._admin_color_picker_content_target_height(content_host) if expanded else 0
+        if animate and animation is not None:
+            animation.stop()
+            animation.setStartValue(content_host.maximumHeight())
+            animation.setEndValue(target_height)
+            animation.start()
+        else:
+            content_host.setMaximumHeight(target_height)
+
+        if normalized_entity == "contact":
+            self._admin_contact_color_picker_open = bool(expanded)
+        elif normalized_entity == "property":
+            self._add_property_color_picker_open = bool(expanded)
+        else:
+            self._admin_jurisdiction_color_picker_open = bool(expanded)
+        toggle_button.setText("v" if expanded else "^")
+        toggle_button.setToolTip("Collapse list color picker" if expanded else "Expand list color picker")
+
+    def _toggle_admin_entity_color_picker(self, entity_kind: str) -> None:
+        self._set_admin_entity_color_picker_open(
+            entity_kind,
+            not self._admin_entity_color_picker_is_open(entity_kind),
+            animate=True,
+        )
+
+    def _set_admin_color_dot_button_style(
+        self,
+        button: QPushButton,
+        *,
+        color_hex: str,
+        selected: bool,
+        placeholder: bool = False,
+    ) -> None:
+        normalized = normalize_list_color(color_hex)
+        if placeholder or not normalized:
+            border = "rgba(99, 124, 150, 186)"
+            if selected:
+                border = "rgba(214, 230, 247, 234)"
+            button.setStyleSheet(
+                (
+                    "QPushButton {"
+                    "border-radius: 10px;"
+                    f"border: 2px dashed {border};"
+                    "background: rgba(0, 0, 0, 0);"
+                    "padding: 0px;"
+                    "}"
+                    "QPushButton:hover {"
+                    f"border: 2px dashed {border};"
+                    "background: rgba(0, 0, 0, 0);"
+                    "}"
+                )
+            )
+            button.setText("")
+            return
+
+        channels = _normalize_card_tint_channels(_hex_color_channels(normalized))
+        border = _dot_ring_color(channels, selected=selected)
+        hover_border = _dot_ring_color(channels, selected=True)
+        border_width = 3 if selected else 1
+        button.setStyleSheet(
+            (
+                "QPushButton {"
+                "border-radius: 10px;"
+                f"border: {border_width}px solid {border};"
+                f"background: {_rgba_text(channels, 255)};"
+                "padding: 0px;"
+                "}"
+                "QPushButton:hover {"
+                f"border: {max(2, border_width)}px solid {hover_border};"
+                f"background: {_rgba_text(channels, 255)};"
+                "}"
+                "QPushButton:disabled {"
+                "border: 1px dashed rgba(121, 146, 173, 186);"
+                f"background: {_rgba_text(channels, 104)};"
+                "}"
+            )
+        )
+        button.setText("")
+
+    def _refresh_admin_color_picker_controls(self, entity_kind: str) -> None:
+        selected, custom = self._admin_entity_color_values(entity_kind)
+        color_buttons, custom_dot, selected_label = self._admin_entity_color_controls(entity_kind)
+        preset_set = set(_ADMIN_LIST_COLOR_PRESETS)
+        for color_hex, button in color_buttons.items():
+            self._set_admin_color_dot_button_style(
+                button,
+                color_hex=color_hex,
+                selected=(selected == color_hex),
+            )
+            button.setToolTip(f"Use {color_hex}")
+
+        if custom_dot is not None:
+            if custom:
+                custom_dot.setEnabled(True)
+                self._set_admin_color_dot_button_style(
+                    custom_dot,
+                    color_hex=custom,
+                    selected=(selected == custom),
+                )
+                custom_dot.setToolTip(f"Use custom color {custom}")
+            else:
+                custom_dot.setEnabled(False)
+                self._set_admin_color_dot_button_style(
+                    custom_dot,
+                    color_hex="",
+                    selected=False,
+                    placeholder=True,
+                )
+                custom_dot.setToolTip("Pick a custom color first.")
+
+        if selected_label is not None:
+            if selected:
+                selected_suffix = " (custom)" if selected == custom and selected not in preset_set else ""
+                selected_label.setText(f"Selected: {selected}{selected_suffix}")
+            else:
+                selected_label.setText("Selected: Theme default")
+        self._set_admin_entity_color_picker_open(
+            entity_kind,
+            self._admin_entity_color_picker_is_open(entity_kind),
+            animate=False,
+        )
+
+    def _set_admin_entity_list_color(
+        self,
+        *,
+        entity_kind: str,
+        color_hex: str,
+        custom_color: str | None = None,
+        notify: bool,
+    ) -> None:
+        selected_current, custom_current = self._admin_entity_color_values(entity_kind)
+        selected = normalize_list_color(color_hex)
+        if custom_color is None:
+            custom = custom_current
+        else:
+            custom = normalize_list_color(custom_color)
+
+        if selected and selected not in _ADMIN_LIST_COLOR_PRESETS and not custom:
+            custom = selected
+        if not selected and custom_color == "":
+            custom = ""
+
+        if selected == selected_current and custom == custom_current:
+            self._refresh_admin_color_picker_controls(entity_kind)
+            return
+
+        self._admin_set_entity_color_values(entity_kind, selected=selected, custom=custom)
+        self._refresh_admin_color_picker_controls(entity_kind)
+        if not notify:
+            return
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        if normalized_entity == "contact":
+            self._on_admin_contact_form_changed()
+        elif normalized_entity == "property":
+            self._on_inline_property_form_changed()
+        else:
+            self._on_admin_jurisdiction_form_changed()
+
+    def _on_admin_color_preset_clicked(self, entity_kind: str, color_hex: str) -> None:
+        selected, _custom = self._admin_entity_color_values(entity_kind)
+        normalized = normalize_list_color(color_hex)
+        if not normalized:
+            return
+        next_color = "" if selected == normalized else normalized
+        self._set_admin_entity_list_color(
+            entity_kind=entity_kind,
+            color_hex=next_color,
+            notify=True,
+        )
+
+    def _on_admin_custom_color_dot_clicked(self, entity_kind: str) -> None:
+        selected, custom = self._admin_entity_color_values(entity_kind)
+        if not custom:
+            return
+        next_color = "" if selected == custom else custom
+        self._set_admin_entity_list_color(
+            entity_kind=entity_kind,
+            color_hex=next_color,
+            notify=True,
+        )
+
+    def _open_admin_custom_color_picker(self, entity_kind: str) -> None:
+        selected, custom = self._admin_entity_color_values(entity_kind)
+        initial_hex = selected or custom or _ADMIN_LIST_COLOR_PRESETS[0]
+        initial_color = QColor(initial_hex)
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        if normalized_entity == "contact":
+            title_prefix = "Contact"
+        elif normalized_entity == "property":
+            title_prefix = "Address"
+        else:
+            title_prefix = "Jurisdiction"
+        picked = QColorDialog.getColor(initial_color, self, f"Pick {title_prefix} List Color")
+        if not picked.isValid():
+            return
+        picked_hex = normalize_list_color(picked.name(QColor.NameFormat.HexRgb))
+        if not picked_hex:
+            return
+        self._set_admin_entity_list_color(
+            entity_kind=entity_kind,
+            color_hex=picked_hex,
+            custom_color=picked_hex,
+            notify=True,
+        )
+
+    def _build_admin_color_picker_widget(self, *, parent: QWidget, entity_kind: str) -> QWidget:
+        normalized_entity = str(entity_kind or "").strip().casefold()
+        host = QWidget(parent)
+        if normalized_entity == "property":
+            host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        else:
+            host.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(6)
+
+        toggle_host = QWidget(host)
+        toggle_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        toggle_row = QHBoxLayout(toggle_host)
+        toggle_row.setContentsMargins(0, 0, 0, 0)
+        toggle_row.setSpacing(6)
+        toggle_row.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        toggle_button = QPushButton("^", toggle_host)
+        toggle_button.setObjectName("TrackerPanelActionButton")
+        toggle_button.setFixedSize(34, 30)
+        toggle_button.clicked.connect(
+            lambda _checked=False, kind=normalized_entity: self._toggle_admin_entity_color_picker(kind)
+        )
+        toggle_row.addStretch(1)
+        toggle_row.addWidget(toggle_button, 0)
+        host_layout.addWidget(toggle_host, 0)
+
+        content_host = QWidget(host)
+        if normalized_entity == "property":
+            content_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        else:
+            content_host.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        content_layout = QVBoxLayout(content_host)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(7)
+
+        presets_host = QWidget(content_host)
+        presets_layout = QGridLayout(presets_host)
+        presets_layout.setContentsMargins(0, 0, 0, 0)
+        presets_layout.setHorizontalSpacing(6)
+        presets_layout.setVerticalSpacing(6)
+
+        color_buttons: dict[str, QPushButton] = {}
+        for index, color_hex in enumerate(_ADMIN_LIST_COLOR_PRESETS):
+            dot_button = QPushButton("", presets_host)
+            dot_button.setFixedSize(22, 22)
+            dot_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            dot_button.clicked.connect(
+                lambda _checked=False, kind=normalized_entity, value=color_hex: self._on_admin_color_preset_clicked(
+                    kind, value
+                )
+            )
+            color_buttons[color_hex] = dot_button
+            presets_layout.addWidget(dot_button, index // 6, index % 6)
+        content_layout.addWidget(presets_host, 0)
+
+        custom_host = QWidget(content_host)
+        custom_row = QHBoxLayout(custom_host)
+        custom_row.setContentsMargins(0, 0, 0, 0)
+        custom_row.setSpacing(8)
+
+        custom_button = QPushButton("Custom Color...", custom_host)
+        custom_button.setObjectName("TrackerPanelActionButton")
+        custom_button.setMinimumHeight(30)
+        custom_button.clicked.connect(
+            lambda _checked=False, kind=normalized_entity: self._open_admin_custom_color_picker(kind)
+        )
+        custom_row.addWidget(custom_button, 0)
+
+        custom_dot = QPushButton("", custom_host)
+        custom_dot.setFixedSize(22, 22)
+        custom_dot.setCursor(Qt.CursorShape.PointingHandCursor)
+        custom_dot.clicked.connect(
+            lambda _checked=False, kind=normalized_entity: self._on_admin_custom_color_dot_clicked(kind)
+        )
+        custom_row.addWidget(custom_dot, 0)
+
+        selected_label = QLabel("Selected: Theme default", custom_host)
+        selected_label.setObjectName("TrackerPanelMeta")
+        selected_label.setWordWrap(True)
+        custom_row.addWidget(selected_label, 1)
+        content_layout.addWidget(custom_host, 0)
+        host_layout.addWidget(content_host, 0)
+
+        picker_animation = QPropertyAnimation(content_host, b"maximumHeight", content_host)
+        picker_animation.setDuration(170)
+        picker_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        if normalized_entity == "contact":
+            self._admin_contact_color_buttons = color_buttons
+            self._admin_contact_custom_color_button = custom_button
+            self._admin_contact_custom_color_dot = custom_dot
+            self._admin_contact_color_selected_label = selected_label
+            self._admin_contact_color_toggle_button = toggle_button
+            self._admin_contact_color_content_host = content_host
+            self._admin_contact_color_animation = picker_animation
+        elif normalized_entity == "jurisdiction":
+            self._admin_jurisdiction_color_buttons = color_buttons
+            self._admin_jurisdiction_custom_color_button = custom_button
+            self._admin_jurisdiction_custom_color_dot = custom_dot
+            self._admin_jurisdiction_color_selected_label = selected_label
+            self._admin_jurisdiction_color_toggle_button = toggle_button
+            self._admin_jurisdiction_color_content_host = content_host
+            self._admin_jurisdiction_color_animation = picker_animation
+        else:
+            self._add_property_color_buttons = color_buttons
+            self._add_property_custom_color_button = custom_button
+            self._add_property_custom_color_dot = custom_dot
+            self._add_property_color_selected_label = selected_label
+            self._add_property_color_toggle_button = toggle_button
+            self._add_property_color_content_host = content_host
+            self._add_property_color_animation = picker_animation
+        self._set_admin_entity_color_picker_open(normalized_entity, False, animate=False)
+        self._refresh_admin_color_picker_controls(normalized_entity)
+        return host
+
+    def _apply_admin_entity_card_color_style(self, card: QFrame, *, color_hex: str) -> None:
+        normalized = normalize_list_color(color_hex)
+        if not normalized:
+            card.setStyleSheet("")
+            return
+
+        tint = _normalize_card_tint_channels(_hex_color_channels(normalized))
+        border_idle = _mix_color_channels(tint, (26, 38, 52), 0.22)
+        border_hover = _mix_color_channels(tint, (26, 38, 52), 0.12)
+        border_selected = _mix_color_channels(tint, (244, 250, 255), 0.18)
+
+        card.setStyleSheet(
+            (
+                f"QFrame#TrackerListCard {{"
+                f"border: 1px solid {_rgba_text(border_idle, 188)};"
+                f"background: {_rgba_text(tint, 42)};"
+                "}"
+                f"QFrame#TrackerListCard:hover {{"
+                f"border: 1px solid {_rgba_text(border_hover, 214)};"
+                f"background: {_rgba_text(tint, 60)};"
+                "}"
+                f"QFrame#TrackerListCard[selected=\"true\"] {{"
+                f"border: 1px solid {_rgba_text(border_selected, 238)};"
+                f"background: {_rgba_text(tint, 88)};"
+                "}"
+            )
+        )
+
+    def _build_admin_entity_card(
+        self,
+        *,
+        title: str,
+        title_field: str,
+        subtitle: str,
+        subtitle_field: str,
+        meta: str,
+        meta_field: str,
+        accent_color: str = "",
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("TrackerListCard")
+        card.setProperty("selected", "false")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        card.setFixedHeight(106)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(3)
+
+        title_label = QLabel(str(title or "").replace("\n", " "), card)
+        title_label.setObjectName("TrackerListFieldValue")
+        title_label.setProperty("field", title_field)
+        title_label.setWordWrap(False)
+        layout.addWidget(title_label, 0)
+
+        if subtitle.strip():
+            subtitle_label = QLabel(str(subtitle or "").replace("\n", " "), card)
+            subtitle_label.setObjectName("TrackerListFieldValue")
+            subtitle_label.setProperty("field", subtitle_field)
+            subtitle_label.setWordWrap(False)
+            layout.addWidget(subtitle_label, 0)
+
+        if meta.strip():
+            meta_label = QLabel(str(meta or "").replace("\n", " "), card)
+            meta_label.setObjectName("TrackerListFieldValue")
+            meta_label.setProperty("field", meta_field)
+            meta_label.setWordWrap(False)
+            layout.addWidget(meta_label, 0)
+
+        self._apply_admin_entity_card_color_style(card, color_hex=accent_color)
+        return card
+
+    def _build_tracker_entity_card(
+        self,
+        *,
+        title: str,
+        title_field: str,
+        subtitle: str,
+        subtitle_field: str,
+        meta: str,
+        meta_field: str,
+        accent_color: str = "",
+        on_edit: Callable[[], None] | None = None,
+        on_remove: Callable[[], None] | None = None,
+    ) -> QFrame:
+        card = TrackerHoverEntityCard(
+            title=title,
+            title_field=title_field,
+            subtitle=subtitle,
+            subtitle_field=subtitle_field,
+            meta=meta,
+            meta_field=meta_field,
+            on_edit=on_edit,
+            on_remove=on_remove,
+        )
+        self._apply_admin_entity_card_color_style(card, color_hex=accent_color)
+        return card
+
+    def _build_admin_input_shell(
+        self,
+        *,
+        label_text: str,
+        field_widget: QWidget,
+        parent: QWidget,
+        shell_bucket: list[QFrame] | None = None,
+        field_stretch: int = 1,
+        left_align_field: bool = False,
+    ) -> QFrame:
+        shell = QFrame(parent)
+        shell.setObjectName("AdminInputShell")
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(10, 6, 10, 6)
+        shell_layout.setSpacing(10)
+        label = QLabel(str(label_text or "").strip(), shell)
+        label.setObjectName("AdminInputShellLabel")
+        label.setMinimumWidth(136)
+        shell_layout.addWidget(label, 0)
+        if left_align_field:
+            shell_layout.addWidget(
+                field_widget,
+                max(0, int(field_stretch)),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            shell_layout.addStretch(1)
+        else:
+            shell_layout.addWidget(field_widget, max(0, int(field_stretch)))
+        if shell_bucket is not None:
+            shell_bucket.append(shell)
+        return shell
+
+    def _set_admin_list_card_selection(self, widget: QListWidget | None) -> None:
+        if widget is None:
+            return
+        for index in range(widget.count()):
+            item = widget.item(index)
+            card = widget.itemWidget(item)
+            if card is None:
+                continue
+            selected_value = "true" if item.isSelected() else "false"
+            if str(card.property("selected") or "") == selected_value:
+                continue
+            card.setProperty("selected", selected_value)
+            style = card.style()
+            style.unpolish(card)
+            style.polish(card)
+            card.update()
