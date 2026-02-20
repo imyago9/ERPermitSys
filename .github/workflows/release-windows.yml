@@ -118,14 +118,23 @@ jobs:
       - name: Build app (PyInstaller onedir)
         shell: bash
         run: |
+          add_data_args=(
+            --add-data "src/erpermitsys/ui/theme;erpermitsys/ui/theme"
+            --add-data "assets;assets"
+            --add-data "plugins;plugins"
+          )
+
+          if [[ -d config ]]; then
+            add_data_args+=(--add-data "config;config")
+          else
+            echo "Skipping optional config bundle directory (./config not found)."
+          fi
+
           pyinstaller --noconfirm --clean --windowed \
             --noupx \
             --name erpermitsys \
             --paths src \
-            --add-data "src/erpermitsys/ui/theme;erpermitsys/ui/theme" \
-            --add-data "assets;assets" \
-            --add-data "plugins;plugins" \
-            --add-data "config;config" \
+            "${add_data_args[@]}" \
             run.py
 
       - name: Install Inno Setup
