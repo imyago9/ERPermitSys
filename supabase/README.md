@@ -9,13 +9,24 @@ This project keeps SQL migrations in two folders:
 
 - `001_erpermitsys_core.sql` / `20260220140000_erpermitsys_core.sql`
 - `002_erpermitsys_realtime_revision.sql` / `20260220153000_erpermitsys_realtime_revision.sql`
+- `003_erpermitsys_relational_snapshot.sql` / `20260221110000_erpermitsys_relational_snapshot.sql`
 
-This migration creates the state table and storage policies required by the app:
+These migrations create the shared state metadata row, normalized snapshot tables, and storage policies required by the app:
 
 - `public.erpermitsys_state`
+- `public.erpermitsys_contacts`
+- `public.erpermitsys_jurisdictions`
+- `public.erpermitsys_properties`
+- `public.erpermitsys_permits`
+- `public.erpermitsys_document_templates`
+- `public.erpermitsys_active_document_templates`
 - storage bucket `erpermitsys-documents`
 - RLS policies/grants for shared access with a key-only workflow
 - revision/realtime metadata columns for multi-client sync (`revision`, `updated_at`, `updated_by`)
+- atomic snapshot RPC `public.erpermitsys_save_snapshot(...)` used by desktop clients
+
+`public.erpermitsys_state.payload` is retained as a compatibility mirror for older clients,
+but current builds read/write the relational tables through the snapshot RPC.
 
 ## Required env for SQL apply
 

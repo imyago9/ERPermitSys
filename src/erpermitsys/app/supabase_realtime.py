@@ -317,7 +317,9 @@ class SupabaseRealtimeClient(QObject):
                 if str(row.get("app_id", "") or "").strip() != subscription.app_id:
                     continue
                 return row
-            if "app_id" in candidate and "payload" in candidate:
+            if "app_id" in candidate and (
+                "payload" in candidate or "revision" in candidate or "updated_at" in candidate
+            ):
                 if str(candidate.get("app_id", "") or "").strip() != subscription.app_id:
                     continue
                 return candidate

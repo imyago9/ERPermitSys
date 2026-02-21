@@ -29,6 +29,13 @@ _APP_ID = "erpermitsys"
 _DEFAULT_SUPABASE_SCHEMA = "public"
 _DEFAULT_SUPABASE_TABLE = "erpermitsys_state"
 _DEFAULT_SUPABASE_TIMEOUT_SECONDS = 8.0
+_SUPABASE_SNAPSHOT_RPC = "erpermitsys_save_snapshot"
+_SUPABASE_CONTACTS_TABLE = "erpermitsys_contacts"
+_SUPABASE_JURISDICTIONS_TABLE = "erpermitsys_jurisdictions"
+_SUPABASE_PROPERTIES_TABLE = "erpermitsys_properties"
+_SUPABASE_PERMITS_TABLE = "erpermitsys_permits"
+_SUPABASE_DOCUMENT_TEMPLATES_TABLE = "erpermitsys_document_templates"
+_SUPABASE_ACTIVE_TEMPLATE_MAP_TABLE = "erpermitsys_active_document_templates"
 _LOCAL_SQLITE_TABLE = "app_state"
 
 
@@ -467,61 +474,365 @@ class SupabaseDataStore:
                 revision=self._known_revision,
             )
             return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty")
-
-        payload = state_row.get("payload")
         self._known_revision = _coerce_non_negative_int(state_row.get("revision"), default=0)
-        if isinstance(payload, dict):
-            try:
-                bundle = TrackerDataBundleV3.from_payload(payload)
-            except Exception as exc:
-                warning = f"Supabase row exists but payload is invalid: {exc}"
-                db_debug(
-                    "supabase.load.payload_invalid",
-                    table=self._config.table,
-                    revision=self._known_revision,
-                    error=str(exc),
-                )
-                return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
+        try:
+            payload = self._load_payload_from_tables()
+            bundle = TrackerDataBundleV3.from_payload(payload)
+            legacy_payload = state_row.get("payload")
+            if _bundle_has_content(bundle) is False and isinstance(legacy_payload, dict):
+                legacy_bundle = TrackerDataBundleV3.from_payload(legacy_payload)
+                if _bundle_has_content(legacy_bundle):
+                    warning = (
+                        "Loaded fallback legacy payload row because table-backed Supabase tables "
+                        "are empty for this app_id."
+                    )
+                    db_debug(
+                        "supabase.load.fallback_legacy_payload",
+                        table=self._config.table,
+                        revision=self._known_revision,
+                        reason="tables_empty",
+                    )
+                    return DataLoadResult(bundle=legacy_bundle, source="primary", warning=warning)
             db_debug(
                 "supabase.load",
                 table=self._config.table,
-                source="primary",
+                source="tables",
                 revision=self._known_revision,
             )
             return DataLoadResult(bundle=bundle, source="primary")
+        except Exception as exc:
+            legacy_payload = state_row.get("payload")
+            if isinstance(legacy_payload, dict):
+                try:
+                    bundle = TrackerDataBundleV3.from_payload(legacy_payload)
+                    warning = (
+                        "Loaded fallback legacy payload row because table-backed Supabase state "
+                        f"was unavailable: {exc}"
+                    )
+                    db_debug(
+                        "supabase.load.fallback_legacy_payload",
+                        table=self._config.table,
+                        revision=self._known_revision,
+                        error=str(exc),
+                    )
+                    return DataLoadResult(bundle=bundle, source="primary", warning=warning)
+                except Exception as legacy_exc:
+                    warning = f"Supabase legacy payload is invalid: {legacy_exc}"
+                    db_debug(
+                        "supabase.load.payload_invalid",
+                        table=self._config.table,
+                        revision=self._known_revision,
+                        error=str(legacy_exc),
+                    )
+                    return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
 
-        warning = "Supabase row exists but payload is missing or not a JSON object."
-        db_debug(
-            "supabase.load.payload_missing",
-            table=self._config.table,
-            revision=self._known_revision,
-        )
-        return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
+            warning = (
+                "Supabase state row exists, but table-backed data could not be loaded and no legacy payload "
+                f"is available: {exc}"
+            )
+            db_debug(
+                "supabase.load.payload_missing",
+                table=self._config.table,
+                revision=self._known_revision,
+                error=str(exc),
+            )
+            return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
 
     def save_bundle(self, bundle: TrackerDataBundleV3) -> None:
         config = self._require_config()
-        table = quote(config.table, safe="_")
-        app_id = quote(_APP_ID, safe="_-")
-        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        state_payload = bundle.to_payload()
         started_at = perf_counter()
 
         if self._known_revision < 0:
             existing_row = self._fetch_state_row()
             if existing_row is not None:
                 self._known_revision = _coerce_non_negative_int(existing_row.get("revision"), default=0)
+            else:
+                self._known_revision = 0
 
-        if self._known_revision < 0:
+        expected_revision = max(0, int(self._known_revision))
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        payload = bundle.to_payload()
+
+        if self._save_bundle_via_rpc(
+            payload=payload,
+            expected_revision=expected_revision,
+            saved_at_utc=now_iso,
+        ):
+            db_debug(
+                "supabase.save",
+                table=config.table,
+                mode="snapshot_rpc",
+                expected_revision=expected_revision,
+                revision=self._known_revision,
+                duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
+            )
+            return
+
+        self._save_bundle_legacy_payload(payload=payload, expected_revision=expected_revision, saved_at_utc=now_iso)
+        db_debug(
+            "supabase.save",
+            table=config.table,
+            mode="legacy_payload",
+            expected_revision=expected_revision,
+            revision=self._known_revision,
+            duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
+        )
+
+    def _load_payload_from_tables(self) -> dict[str, Any]:
+        contacts_rows = self._fetch_table_rows(
+            table=_SUPABASE_CONTACTS_TABLE,
+            select="contact_id,name,numbers,emails,roles,contact_methods,list_color",
+            order="contact_id.asc",
+        )
+        jurisdictions_rows = self._fetch_table_rows(
+            table=_SUPABASE_JURISDICTIONS_TABLE,
+            select=(
+                "jurisdiction_id,name,jurisdiction_type,parent_county,portal_urls,contact_ids,"
+                "portal_vendor,notes,list_color"
+            ),
+            order="jurisdiction_id.asc",
+        )
+        properties_rows = self._fetch_table_rows(
+            table=_SUPABASE_PROPERTIES_TABLE,
+            select=(
+                "property_id,display_address,parcel_id,parcel_id_norm,jurisdiction_id,contact_ids,"
+                "list_color,tags,notes"
+            ),
+            order="property_id.asc",
+        )
+        permits_rows = self._fetch_table_rows(
+            table=_SUPABASE_PERMITS_TABLE,
+            select=(
+                "permit_id,property_id,permit_type,permit_number,status,next_action_text,next_action_due,"
+                "request_date,application_date,issued_date,final_date,completion_date,parties,events,"
+                "document_slots,document_folders,documents"
+            ),
+            order="permit_id.asc",
+        )
+        templates_rows = self._fetch_table_rows(
+            table=_SUPABASE_DOCUMENT_TEMPLATES_TABLE,
+            select="template_id,name,permit_type,slots,notes",
+            order="template_id.asc",
+        )
+        template_map_rows = self._fetch_table_rows(
+            table=_SUPABASE_ACTIVE_TEMPLATE_MAP_TABLE,
+            select="permit_type,template_id",
+            order="permit_type.asc",
+        )
+
+        contacts: list[dict[str, Any]] = []
+        for row in contacts_rows:
+            contact_id = self._row_text(row, "contact_id")
+            if not contact_id:
+                continue
+            contacts.append(
+                {
+                    "contact_id": contact_id,
+                    "name": self._row_text(row, "name"),
+                    "numbers": self._row_json_array(row, "numbers"),
+                    "emails": self._row_json_array(row, "emails"),
+                    "roles": self._row_json_array(row, "roles"),
+                    "contact_methods": self._row_json_array(row, "contact_methods"),
+                    "list_color": self._row_text(row, "list_color"),
+                }
+            )
+
+        jurisdictions: list[dict[str, Any]] = []
+        for row in jurisdictions_rows:
+            jurisdiction_id = self._row_text(row, "jurisdiction_id")
+            if not jurisdiction_id:
+                continue
+            jurisdictions.append(
+                {
+                    "jurisdiction_id": jurisdiction_id,
+                    "name": self._row_text(row, "name"),
+                    "jurisdiction_type": self._row_text(row, "jurisdiction_type"),
+                    "parent_county": self._row_text(row, "parent_county"),
+                    "portal_urls": self._row_json_array(row, "portal_urls"),
+                    "contact_ids": self._row_json_array(row, "contact_ids"),
+                    "portal_vendor": self._row_text(row, "portal_vendor"),
+                    "notes": self._row_text(row, "notes"),
+                    "list_color": self._row_text(row, "list_color"),
+                }
+            )
+
+        properties: list[dict[str, Any]] = []
+        for row in properties_rows:
+            property_id = self._row_text(row, "property_id")
+            if not property_id:
+                continue
+            properties.append(
+                {
+                    "property_id": property_id,
+                    "display_address": self._row_text(row, "display_address"),
+                    "parcel_id": self._row_text(row, "parcel_id"),
+                    "parcel_id_norm": self._row_text(row, "parcel_id_norm"),
+                    "jurisdiction_id": self._row_text(row, "jurisdiction_id"),
+                    "contact_ids": self._row_json_array(row, "contact_ids"),
+                    "list_color": self._row_text(row, "list_color"),
+                    "tags": self._row_json_array(row, "tags"),
+                    "notes": self._row_text(row, "notes"),
+                }
+            )
+
+        permits: list[dict[str, Any]] = []
+        for row in permits_rows:
+            permit_id = self._row_text(row, "permit_id")
+            if not permit_id:
+                continue
+            permits.append(
+                {
+                    "permit_id": permit_id,
+                    "property_id": self._row_text(row, "property_id"),
+                    "permit_type": self._row_text(row, "permit_type"),
+                    "permit_number": self._row_text(row, "permit_number"),
+                    "status": self._row_text(row, "status"),
+                    "next_action_text": self._row_text(row, "next_action_text"),
+                    "next_action_due": self._row_text(row, "next_action_due"),
+                    "request_date": self._row_text(row, "request_date"),
+                    "application_date": self._row_text(row, "application_date"),
+                    "issued_date": self._row_text(row, "issued_date"),
+                    "final_date": self._row_text(row, "final_date"),
+                    "completion_date": self._row_text(row, "completion_date"),
+                    "parties": self._row_json_array(row, "parties"),
+                    "events": self._row_json_array(row, "events"),
+                    "document_slots": self._row_json_array(row, "document_slots"),
+                    "document_folders": self._row_json_array(row, "document_folders"),
+                    "documents": self._row_json_array(row, "documents"),
+                }
+            )
+
+        document_templates: list[dict[str, Any]] = []
+        for row in templates_rows:
+            template_id = self._row_text(row, "template_id")
+            if not template_id:
+                continue
+            document_templates.append(
+                {
+                    "template_id": template_id,
+                    "name": self._row_text(row, "name"),
+                    "permit_type": self._row_text(row, "permit_type"),
+                    "slots": self._row_json_array(row, "slots"),
+                    "notes": self._row_text(row, "notes"),
+                }
+            )
+
+        active_document_template_ids: dict[str, str] = {}
+        for row in template_map_rows:
+            permit_type = self._row_text(row, "permit_type")
+            template_id = self._row_text(row, "template_id")
+            if not permit_type or not template_id:
+                continue
+            active_document_template_ids[permit_type] = template_id
+
+        return {
+            "contacts": contacts,
+            "jurisdictions": jurisdictions,
+            "properties": properties,
+            "permits": permits,
+            "document_templates": document_templates,
+            "active_document_template_ids": active_document_template_ids,
+        }
+
+    @staticmethod
+    def _row_text(row: dict[str, Any], key: str) -> str:
+        value = row.get(key, "")
+        return str(value or "").strip()
+
+    @staticmethod
+    def _row_json_array(row: dict[str, Any], key: str) -> list[Any]:
+        value = row.get(key)
+        if isinstance(value, list):
+            return value
+        return []
+
+    def _save_bundle_via_rpc(
+        self,
+        *,
+        payload: dict[str, Any],
+        expected_revision: int,
+        saved_at_utc: str,
+    ) -> bool:
+        rpc_path = f"/rest/v1/rpc/{quote(_SUPABASE_SNAPSHOT_RPC, safe='_')}"
+        rpc_payload = {
+            "p_app_id": _APP_ID,
+            "p_expected_revision": int(expected_revision),
+            "p_schema_version": int(_SCHEMA_VERSION),
+            "p_saved_at_utc": saved_at_utc,
+            "p_updated_by": self._client_id,
+            "p_contacts": payload.get("contacts", []),
+            "p_jurisdictions": payload.get("jurisdictions", []),
+            "p_properties": payload.get("properties", []),
+            "p_permits": payload.get("permits", []),
+            "p_document_templates": payload.get("document_templates", []),
+            "p_active_document_template_ids": payload.get("active_document_template_ids", {}),
+        }
+        try:
+            raw = self._request_json(
+                method="POST",
+                path=rpc_path,
+                payload=rpc_payload,
+                prefer="",
+                expect_json=True,
+            )
+        except RuntimeError as exc:
+            if _is_missing_rpc_function_error(exc):
+                db_debug(
+                    "supabase.save.snapshot_rpc_missing",
+                    table=self._config.table,
+                    rpc=_SUPABASE_SNAPSHOT_RPC,
+                )
+                return False
+            raise
+
+        result = raw
+        if isinstance(raw, list):
+            if raw and isinstance(raw[0], dict):
+                result = raw[0]
+            else:
+                result = None
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                f"Supabase snapshot RPC returned an invalid response type: {type(raw).__name__}"
+            )
+
+        conflict = bool(result.get("conflict"))
+        revision = _coerce_non_negative_int(result.get("revision"), default=expected_revision)
+        applied = bool(result.get("applied"))
+        self._known_revision = revision
+        if conflict or not applied:
+            db_debug(
+                "supabase.save.conflict",
+                table=self._config.table,
+                expected_revision=expected_revision,
+                known_revision=self._known_revision,
+                via="snapshot_rpc",
+            )
+            raise SupabaseRevisionConflictError(expected_revision=expected_revision)
+        return True
+
+    def _save_bundle_legacy_payload(
+        self,
+        *,
+        payload: dict[str, Any],
+        expected_revision: int,
+        saved_at_utc: str,
+    ) -> None:
+        config = self._require_config()
+        table = quote(config.table, safe="_")
+        app_id = quote(_APP_ID, safe="_-")
+
+        if expected_revision <= 0:
             insert_rows = [
                 {
                     "app_id": _APP_ID,
                     "schema_version": _SCHEMA_VERSION,
                     "backend": self.backend,
-                    "saved_at_utc": now_iso,
-                    "updated_at": now_iso,
+                    "saved_at_utc": saved_at_utc,
+                    "updated_at": saved_at_utc,
                     "updated_by": self._client_id,
                     "revision": 1,
-                    "payload": state_payload,
+                    "payload": payload,
                 }
             ]
             try:
@@ -534,22 +845,9 @@ class SupabaseDataStore:
                     expect_json=True,
                 )
                 self._known_revision = _extract_saved_revision(inserted, default=1)
-                db_debug(
-                    "supabase.save",
-                    table=config.table,
-                    mode="insert",
-                    revision=self._known_revision,
-                    duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
-                )
                 return
             except RuntimeError as exc:
                 if not _is_postgrest_conflict_error(exc):
-                    db_debug(
-                        "supabase.save.error",
-                        table=config.table,
-                        mode="insert",
-                        error=str(exc),
-                    )
                     raise
                 existing_row = self._fetch_state_row()
                 if existing_row is None:
@@ -558,8 +856,8 @@ class SupabaseDataStore:
                         message=f"Could not insert initial Supabase state: {exc}",
                     ) from exc
                 self._known_revision = _coerce_non_negative_int(existing_row.get("revision"), default=0)
+                expected_revision = max(0, int(self._known_revision))
 
-        expected_revision = max(0, int(self._known_revision))
         patched = self._request_json(
             method="PATCH",
             path=f"/rest/v1/{table}",
@@ -571,11 +869,11 @@ class SupabaseDataStore:
             payload={
                 "schema_version": _SCHEMA_VERSION,
                 "backend": self.backend,
-                "saved_at_utc": now_iso,
-                "updated_at": now_iso,
+                "saved_at_utc": saved_at_utc,
+                "updated_at": saved_at_utc,
                 "updated_by": self._client_id,
                 "revision": expected_revision + 1,
-                "payload": state_payload,
+                "payload": payload,
             },
             prefer="return=representation",
             expect_json=True,
@@ -585,23 +883,9 @@ class SupabaseDataStore:
             fresh_row = self._fetch_state_row()
             if fresh_row is not None:
                 self._known_revision = _coerce_non_negative_int(fresh_row.get("revision"), default=expected_revision)
-            db_debug(
-                "supabase.save.conflict",
-                table=config.table,
-                expected_revision=expected_revision,
-                known_revision=self._known_revision,
-            )
             raise SupabaseRevisionConflictError(expected_revision=expected_revision)
 
         self._known_revision = _extract_saved_revision(patched, default=expected_revision + 1)
-        db_debug(
-            "supabase.save",
-            table=config.table,
-            mode="update",
-            expected_revision=expected_revision,
-            revision=self._known_revision,
-            duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
-        )
 
     def _require_config(self) -> SupabaseDataStoreConfig:
         if self._config.configured:
@@ -632,6 +916,34 @@ class SupabaseDataStore:
         if isinstance(first, dict):
             return first
         return None
+
+    def _fetch_table_rows(
+        self,
+        *,
+        table: str,
+        select: str,
+        order: str = "",
+    ) -> list[dict[str, Any]]:
+        safe_table = quote(table, safe="_")
+        app_id = quote(_APP_ID, safe="_-")
+        query = f"?select={select}&app_id=eq.{app_id}"
+        if order:
+            query = f"{query}&order={order}"
+        rows = self._request_json(
+            method="GET",
+            path=f"/rest/v1/{safe_table}",
+            query=query,
+            payload=None,
+            prefer="",
+            expect_json=True,
+        )
+        if not isinstance(rows, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for item in rows:
+            if isinstance(item, dict):
+                normalized.append(item)
+        return normalized
 
     def _request_json(
         self,
@@ -773,6 +1085,24 @@ def _is_postgrest_conflict_error(exc: RuntimeError) -> bool:
         return True
     # PostgREST can return unique violation details while still represented as 400.
     return "duplicate key value" in text or "23505" in text
+
+
+def _is_missing_rpc_function_error(exc: RuntimeError) -> bool:
+    text = str(exc).casefold()
+    return "could not find the function" in text or "pgrst202" in text or "404 not found" in text
+
+
+def _bundle_has_content(bundle: TrackerDataBundleV3) -> bool:
+    return any(
+        (
+            bool(bundle.contacts),
+            bool(bundle.jurisdictions),
+            bool(bundle.properties),
+            bool(bundle.permits),
+            bool(bundle.document_templates),
+            bool(bundle.active_document_template_ids),
+        )
+    )
 
 
 def create_data_store(
