@@ -42,7 +42,7 @@ class WindowWorkspaceStateMixin:
         text = str(state_text or "").strip()
         if not text:
             text = "Select Permit"
-        self._workspace_title_label.setText(f"Permit Workspace 0.0.11 - {text}")
+        self._workspace_title_label.setText(f"Permit Workspace - {text}")
 
     def _set_workspace_info_values(self, **values: str) -> None:
         for key, label in self._workspace_info_values.items():
