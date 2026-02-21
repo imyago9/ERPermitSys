@@ -11,7 +11,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 ROOT = Path(SPECPATH).resolve().parents[1]
 SRC = ROOT / "src"
 RUN = ROOT / "run.py"
-SETTINGS_DIALOG = SRC / "erpermitsys" / "ui" / "settings_dialog.py"
+SETTINGS_DIALOG = SRC / "erpermitsys" / "ui" / "settings_dialog" / "__init__.py"
 
 if not RUN.is_file():
     raise SystemExit(f"PyInstaller spec root resolution failed: missing {RUN}")
