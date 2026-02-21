@@ -123,6 +123,9 @@ jobs:
             --add-data "assets;assets"
             --add-data "plugins;plugins"
           )
+          hidden_import_args=(
+            --hidden-import "erpermitsys.ui.settings.settings_dialog"
+          )
 
           if [[ -d config ]]; then
             add_data_args+=(--add-data "config;config")
@@ -135,6 +138,7 @@ jobs:
             --name erpermitsys \
             --paths src \
             "${add_data_args[@]}" \
+            "${hidden_import_args[@]}" \
             run.py
 
       - name: Install Inno Setup
