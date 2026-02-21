@@ -57,6 +57,9 @@ from erpermitsys.app.updater import (
 from erpermitsys.app.window_bound_service import WindowBoundService
 
 
+_SUPABASE_REVISION_POLL_INTERVAL_MS = 5_000
+
+
 class WindowStorageUpdateService(WindowBoundService):
     def _close_to_home_view(self) -> None:
         if hasattr(self, "_workspace_state"):
@@ -189,11 +192,13 @@ class WindowStorageUpdateService(WindowBoundService):
                 app_id="erpermitsys",
             )
         )
+        self._start_supabase_revision_polling()
 
     def _shutdown_supabase_realtime_subscription(self) -> None:
         client = getattr(self, "_supabase_realtime_client", None)
         if isinstance(client, SupabaseRealtimeClient):
             client.stop()
+        self._stop_supabase_revision_polling()
         self._supabase_realtime_pending_refresh = False
         self._supabase_realtime_pending_notice_shown = False
         self._supabase_realtime_apply_running = False
@@ -235,6 +240,56 @@ class WindowStorageUpdateService(WindowBoundService):
                 )
             return
         self._apply_remote_supabase_refresh(trigger="realtime")
+
+    def _ensure_supabase_revision_poll_timer(self) -> QTimer:
+        timer = getattr(self, "_supabase_revision_poll_timer", None)
+        if isinstance(timer, QTimer):
+            return timer
+        timer = QTimer(self.window)
+        timer.setInterval(_SUPABASE_REVISION_POLL_INTERVAL_MS)
+        timer.timeout.connect(self._on_supabase_revision_poll_tick)
+        self._supabase_revision_poll_timer = timer
+        return timer
+
+    def _start_supabase_revision_polling(self) -> None:
+        timer = self._ensure_supabase_revision_poll_timer()
+        if timer.isActive():
+            return
+        timer.start()
+
+    def _stop_supabase_revision_polling(self) -> None:
+        timer = getattr(self, "_supabase_revision_poll_timer", None)
+        if isinstance(timer, QTimer):
+            timer.stop()
+
+    def _on_supabase_revision_poll_tick(self) -> None:
+        if normalize_data_storage_backend(self._data_storage_backend, default=BACKEND_LOCAL_SQLITE) != BACKEND_SUPABASE:
+            return
+        if not isinstance(self._data_store, SupabaseDataStore):
+            return
+        if self._supabase_realtime_apply_running:
+            return
+        try:
+            incoming_revision = self._data_store.fetch_remote_revision()
+        except Exception:
+            return
+        if incoming_revision is None:
+            return
+
+        known_revision = self._coerce_revision_value(self._data_store.known_revision, default=-1)
+        if int(incoming_revision) <= known_revision:
+            return
+        if self._has_local_editor_in_progress():
+            self._supabase_realtime_pending_refresh = True
+            if not self._supabase_realtime_pending_notice_shown:
+                self._supabase_realtime_pending_notice_shown = True
+                self._show_info_dialog(
+                    "Remote Update Available",
+                    "Supabase data changed on another computer.\n\n"
+                    "Finish the current edit (save or cancel) and the latest data will be pulled in.",
+                )
+            return
+        self._apply_remote_supabase_refresh(trigger="poll")
 
     def _has_local_editor_in_progress(self) -> bool:
         if str(getattr(self, "_active_inline_form_view", "") or "").strip():
@@ -604,47 +659,71 @@ class WindowStorageUpdateService(WindowBoundService):
             return None
         if not isinstance(self._data_store, SupabaseDataStore):
             return None
-        remote_result = self._safe_load_bundle(self._data_store)
-        if remote_result.source == "empty" and remote_result.warning:
-            return None
+        local_payload = local_bundle.to_payload()
+        expected_revision = int(conflict_error.expected_revision)
+        max_attempts = 3
 
-        try:
-            self._data_store.save_bundle(local_bundle)
-            self._state_streamer.record(
-                "data.supabase_conflict_resolved",
-                source="main_window",
-                payload={
-                    "strategy": "retry_local",
-                    "expected_revision": conflict_error.expected_revision,
-                },
-            )
-            return local_bundle
-        except SupabaseRevisionConflictError:
-            pass
-        except Exception:
-            return None
+        for attempt in range(1, max_attempts + 1):
+            remote_result = self._safe_load_bundle(self._data_store)
+            if remote_result.source == "empty" and remote_result.warning:
+                return None
+            remote_bundle = remote_result.bundle
+            remote_payload = remote_bundle.to_payload()
 
-        merged_bundle, merge_stats = self._merge_bundle_for_supabase_switch(
-            remote_result.bundle,
-            local_bundle,
-        )
-        try:
-            self._data_store.save_bundle(merged_bundle)
-            self._state_streamer.record(
-                "data.supabase_conflict_resolved",
-                source="main_window",
-                payload={
-                    "strategy": "merge_then_save",
-                    "expected_revision": conflict_error.expected_revision,
-                    "merge_properties_added": int(merge_stats.get("properties_added", 0)),
-                    "merge_property_duplicates_skipped": int(
-                        merge_stats.get("properties_duplicates_skipped", 0)
-                    ),
-                },
+            if remote_payload == local_payload:
+                self._state_streamer.record(
+                    "data.supabase_conflict_resolved",
+                    source="main_window",
+                    payload={
+                        "strategy": "remote_already_applied",
+                        "expected_revision": expected_revision,
+                        "attempt": attempt,
+                    },
+                )
+                return remote_bundle
+
+            merged_bundle, merge_stats = self._merge_bundle_for_supabase_switch(
+                remote_bundle,
+                local_bundle,
             )
-            return merged_bundle
-        except Exception:
-            return None
+            if merged_bundle.to_payload() == remote_payload:
+                self._state_streamer.record(
+                    "data.supabase_conflict_resolved",
+                    source="main_window",
+                    payload={
+                        "strategy": "remote_preserved",
+                        "expected_revision": expected_revision,
+                        "attempt": attempt,
+                        "merge_properties_added": int(merge_stats.get("properties_added", 0)),
+                        "merge_property_duplicates_skipped": int(
+                            merge_stats.get("properties_duplicates_skipped", 0)
+                        ),
+                    },
+                )
+                return remote_bundle
+
+            try:
+                self._data_store.save_bundle(merged_bundle)
+                self._state_streamer.record(
+                    "data.supabase_conflict_resolved",
+                    source="main_window",
+                    payload={
+                        "strategy": "merge_then_save",
+                        "expected_revision": expected_revision,
+                        "attempt": attempt,
+                        "merge_properties_added": int(merge_stats.get("properties_added", 0)),
+                        "merge_property_duplicates_skipped": int(
+                            merge_stats.get("properties_duplicates_skipped", 0)
+                        ),
+                    },
+                )
+                return merged_bundle
+            except SupabaseRevisionConflictError as retry_conflict:
+                expected_revision = int(retry_conflict.expected_revision)
+                continue
+            except Exception:
+                return None
+        return None
 
     def _on_export_json_backup_requested(self, requested_path: str) -> str:
         requested = str(requested_path or "").strip()

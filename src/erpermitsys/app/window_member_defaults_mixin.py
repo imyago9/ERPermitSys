@@ -28,6 +28,7 @@ class WindowMemberDefaultsMixin:
         self._storage_update_service_instance = None
         self._admin_layout_service_instance = None
         self._supabase_realtime_client = None
+        self._supabase_revision_poll_timer = None
         self._supabase_realtime_pending_refresh = False
         self._supabase_realtime_pending_notice_shown = False
         self._supabase_realtime_apply_running = False

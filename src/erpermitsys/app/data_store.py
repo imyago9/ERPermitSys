@@ -456,6 +456,25 @@ class SupabaseDataStore:
     def known_revision(self) -> int:
         return max(-1, int(self._known_revision))
 
+    def fetch_remote_revision(self) -> int | None:
+        config = self._require_config()
+        table = quote(config.table, safe="_")
+        app_id = quote(_APP_ID, safe="_-")
+        rows = self._request_json(
+            method="GET",
+            path=f"/rest/v1/{table}",
+            query=f"?select=revision&app_id=eq.{app_id}&limit=1",
+            payload=None,
+            prefer="",
+            expect_json=True,
+        )
+        if not isinstance(rows, list) or not rows:
+            return None
+        state_row = rows[0]
+        if not isinstance(state_row, dict):
+            return None
+        return _coerce_non_negative_int(state_row.get("revision"), default=0)
+
     @property
     def client_id(self) -> str:
         return self._client_id
