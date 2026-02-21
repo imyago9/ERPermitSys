@@ -41,6 +41,7 @@ supabase/.branches/
 build/
 dist/
 *.spec
+!scripts/windows/erpermitsys.spec
 
 # OS noise
 .DS_Store

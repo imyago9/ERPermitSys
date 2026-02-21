@@ -56,7 +56,7 @@ from erpermitsys.core import StateStreamer
 from erpermitsys.plugins import PluginManager
 from erpermitsys.plugins.api import PluginApiService
 from erpermitsys.ui.assets import icon_asset_path
-from erpermitsys.ui.settings import SettingsDialog
+from erpermitsys.ui.settings_dialog import SettingsDialog
 from erpermitsys.ui.theme import apply_app_theme
 from erpermitsys.ui.window.frameless_window import FramelessWindow
 from erpermitsys.version import APP_VERSION, GITHUB_RELEASE_ASSET_NAME, GITHUB_RELEASE_REPO

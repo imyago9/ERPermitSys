@@ -118,24 +118,40 @@ jobs:
       - name: Build app (PyInstaller onedir)
         shell: bash
         run: |
-          add_data_args=(
-            --add-data "src/erpermitsys/ui/theme;erpermitsys/ui/theme"
-            --add-data "assets;assets"
-            --add-data "plugins;plugins"
+          pyinstaller --noconfirm --clean scripts/windows/erpermitsys.spec
+
+      - name: Verify bundled modules
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PyInstaller.archive.readers import CArchiveReader
+
+          exe_path = Path("dist/erpermitsys/erpermitsys.exe")
+          if not exe_path.exists():
+              raise SystemExit(f"Expected executable was not built: {exe_path}")
+
+          archive = CArchiveReader(str(exe_path))
+          pyz = archive.open_embedded_archive("PYZ.pyz")
+          ui_modules = sorted(name for name in pyz.toc if name.startswith("erpermitsys.ui"))
+          print("Bundled erpermitsys.ui modules:")
+          for name in ui_modules:
+              print(f" - {name}")
+
+          required_modules = (
+              "erpermitsys.app.main",
+              "erpermitsys.app.window_shell_mixin",
+              "erpermitsys.ui.settings_dialog",
+              "erpermitsys.ui.assets",
           )
+          missing = [name for name in required_modules if name not in pyz.toc]
+          if missing:
+              raise SystemExit(f"PyInstaller bundle is missing required modules: {missing}")
 
-          if [[ -d config ]]; then
-            add_data_args+=(--add-data "config;config")
-          else
-            echo "Skipping optional config bundle directory (./config not found)."
-          fi
-
-          pyinstaller --noconfirm --clean --windowed \
-            --noupx \
-            --name erpermitsys \
-            --paths src \
-            "${add_data_args[@]}" \
-            run.py
+          print("Verified required modules in bundled PYZ:")
+          for name in required_modules:
+              print(f" - {name}")
+          PY
 
       - name: Install Inno Setup
         shell: pwsh

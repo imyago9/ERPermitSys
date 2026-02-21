@@ -13,7 +13,7 @@ from erpermitsys.app.settings_store import (
     save_palette_shortcut_settings,
 )
 from erpermitsys.ui.assets import icon_asset_path
-from erpermitsys.ui.settings import SettingsDialog
+from erpermitsys.ui.settings_dialog import SettingsDialog
 from erpermitsys.ui.theme import apply_app_theme
 
 

@@ -959,7 +959,11 @@ class SettingsDialog(FramelessDialog):
     def _on_export_json_clicked(self) -> None:
         start_dir = self._data_storage_folder or ""
         default_name = DEFAULT_DATA_FILE_NAME
-        initial_path = f"{start_dir.rstrip('/\\')}/{default_name}" if start_dir else default_name
+        if start_dir:
+            normalized_start_dir = start_dir.rstrip("/\\")
+            initial_path = f"{normalized_start_dir}/{default_name}"
+        else:
+            initial_path = default_name
         selected, _selected_filter = QFileDialog.getSaveFileName(
             self,
             "Export Tracker Data as JSON",
