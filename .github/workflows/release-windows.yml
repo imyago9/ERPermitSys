@@ -119,14 +119,12 @@ jobs:
         shell: bash
         run: |
           add_data_args=(
-            --add-data "src/erpermitsys/ui/theme;erpermitsys/ui/theme"
             --add-data "assets;assets"
             --add-data "plugins;plugins"
           )
-          hidden_import_args=(
-            --hidden-import "erpermitsys.ui.settings_dialog"
-            --hidden-import "erpermitsys.ui.settings.settings_dialog"
-            --collect-submodules "erpermitsys.ui.settings"
+          collect_args=(
+            --collect-submodules "erpermitsys"
+            --collect-data "erpermitsys"
           )
 
           if [[ -d config ]]; then
@@ -140,7 +138,7 @@ jobs:
             --name erpermitsys \
             --paths src \
             "${add_data_args[@]}" \
-            "${hidden_import_args[@]}" \
+            "${collect_args[@]}" \
             run.py
 
       - name: Install Inno Setup
