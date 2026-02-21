@@ -325,6 +325,52 @@ class WindowShellMixin:
         self._settings_button.move(x, y)
         if not self._settings_button.isVisible():
             self._settings_button.show()
+        self._position_settings_connection_bubble()
+
+    def _position_settings_connection_bubble(self) -> None:
+        button = self._settings_button
+        bubble = self._settings_connection_bubble
+        if button is None or bubble is None:
+            return
+        if not button.isVisible():
+            bubble.hide()
+            return
+        bubble.adjustSize()
+        x = int(button.x() + button.width() - max(4, int(round(bubble.width() * 0.45))))
+        y = int(button.y() - max(3, int(round(bubble.height() * 0.25))))
+        bubble.move(x, y)
+        if not bubble.isVisible():
+            bubble.show()
+
+    def _set_supabase_connection_badge(self, *, state: str, message: str = "") -> None:
+        bubble = self._settings_connection_bubble
+        if bubble is None:
+            return
+        normalized_state = str(state or "").strip().lower() or "local"
+        normalized_message = str(message or "").strip()
+        self._supabase_connection_state = normalized_state
+        self._supabase_connection_message = normalized_message
+
+        tooltip = normalized_message
+        if not tooltip:
+            fallback = {
+                "local": "Using local SQLite storage.",
+                "connecting": "Connecting to Supabase realtime.",
+                "connected": "Supabase realtime connected.",
+                "polling": "Realtime unavailable; polling Supabase every 2 seconds.",
+                "syncing": "Syncing latest Supabase data.",
+                "warning": "Supabase sync warning.",
+                "error": "Supabase sync error.",
+            }
+            tooltip = fallback.get(normalized_state, "Supabase connection status unavailable.")
+
+        bubble.setProperty("connectionState", normalized_state)
+        bubble.setToolTip(tooltip)
+        style = bubble.style()
+        if style is not None:
+            style.unpolish(bubble)
+            style.polish(bubble)
+        self._position_settings_connection_bubble()
 
     def _position_tracker_panels(self) -> None:
         if self._panel_host is None or self._scene_widget is None:
@@ -352,6 +398,8 @@ class WindowShellMixin:
             self._panel_host.raise_()
         if self._settings_button is not None:
             self._settings_button.raise_()
+        if self._settings_connection_bubble is not None:
+            self._settings_connection_bubble.raise_()
         resize_handle = getattr(self, "_resize_handle", None)
         if resize_handle is not None:
             try:

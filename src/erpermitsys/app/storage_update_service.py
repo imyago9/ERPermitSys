@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QTimer, Qt, QUrl
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QProgressDialog
 
@@ -58,6 +58,41 @@ from erpermitsys.app.window_bound_service import WindowBoundService
 
 
 _SUPABASE_REVISION_POLL_INTERVAL_MS = 2_000
+
+
+class _SupabaseRevisionPollWorker(QObject):
+    finished = Signal(object, str)
+
+    def __init__(self, data_store: SupabaseDataStore) -> None:
+        super().__init__()
+        self._data_store = data_store
+
+    def run(self) -> None:
+        try:
+            revision = self._data_store.fetch_remote_revision()
+            self.finished.emit(revision, "")
+        except Exception as exc:
+            self.finished.emit(None, str(exc))
+
+
+class _SupabaseLoadBundleWorker(QObject):
+    finished = Signal(object)
+
+    def __init__(self, data_store: SupabaseDataStore, backend: str) -> None:
+        super().__init__()
+        self._data_store = data_store
+        self._backend = str(backend or "").strip() or BACKEND_SUPABASE
+
+    def run(self) -> None:
+        try:
+            result = self._data_store.load_bundle()
+        except Exception as exc:
+            result = DataLoadResult(
+                bundle=TrackerDataBundleV3(),
+                source="empty",
+                warning=f"Could not load tracker data from {self._backend}: {exc}",
+            )
+        self.finished.emit(result)
 
 
 class WindowStorageUpdateService(WindowBoundService):
@@ -169,6 +204,17 @@ class WindowStorageUpdateService(WindowBoundService):
         self._supabase_realtime_client = client
         return client
 
+    def _set_supabase_connection_status(self, state: str, message: str = "") -> None:
+        normalized_state = str(state or "").strip().lower() or "local"
+        self._supabase_connection_state = normalized_state
+        self._supabase_connection_message = str(message or "").strip()
+        bubble_updater = getattr(self, "_set_supabase_connection_badge", None)
+        if callable(bubble_updater):
+            try:
+                bubble_updater(state=normalized_state, message=self._supabase_connection_message)
+            except Exception:
+                pass
+
     def _sync_supabase_realtime_subscription(self) -> None:
         backend = normalize_data_storage_backend(
             self._data_storage_backend,
@@ -176,12 +222,18 @@ class WindowStorageUpdateService(WindowBoundService):
         )
         if backend != BACKEND_SUPABASE or not isinstance(self._data_store, SupabaseDataStore):
             self._shutdown_supabase_realtime_subscription()
+            self._set_supabase_connection_status("local", "Using local SQLite storage.")
             return
         settings = self._supabase_settings
         if not settings.configured:
             self._shutdown_supabase_realtime_subscription()
+            self._set_supabase_connection_status(
+                "warning",
+                "Supabase selected, but URL/API key is missing.",
+            )
             return
 
+        self._set_supabase_connection_status("connecting", "Connecting to Supabase realtime...")
         client = self._ensure_supabase_realtime_client()
         client.start(
             SupabaseRealtimeSubscription(
@@ -199,6 +251,8 @@ class WindowStorageUpdateService(WindowBoundService):
         if isinstance(client, SupabaseRealtimeClient):
             client.stop()
         self._stop_supabase_revision_polling()
+        self._stop_supabase_revision_poll_job()
+        self._stop_supabase_refresh_job()
         self._supabase_realtime_pending_refresh = False
         self._supabase_realtime_pending_notice_shown = False
         self._supabase_realtime_apply_running = False
@@ -216,6 +270,31 @@ class WindowStorageUpdateService(WindowBoundService):
                 "message": text,
             },
         )
+        lowered = text.casefold()
+        if "joined" in lowered:
+            self._set_supabase_connection_status("connected", text)
+            return
+        if "connected" in lowered and "disconnected" not in lowered:
+            self._set_supabase_connection_status("connected", text)
+            return
+        if "connecting" in lowered:
+            self._set_supabase_connection_status("connecting", text)
+            return
+        if "disconnected" in lowered or "reconnecting" in lowered:
+            self._set_supabase_connection_status("polling", text)
+            return
+        if "qtwebsockets is unavailable" in lowered:
+            self._set_supabase_connection_status(
+                "polling",
+                "Realtime websocket unavailable; using polling fallback.",
+            )
+            return
+        if normalized_level == "warning":
+            self._set_supabase_connection_status("warning", text)
+            return
+        if normalized_level == "error":
+            self._set_supabase_connection_status("error", text)
+            return
 
     def _on_supabase_realtime_state_row(self, state_row: dict[str, Any]) -> None:
         if normalize_data_storage_backend(self._data_storage_backend, default=BACKEND_LOCAL_SQLITE) != BACKEND_SUPABASE:
@@ -271,15 +350,42 @@ class WindowStorageUpdateService(WindowBoundService):
             return
         if self._supabase_realtime_apply_running:
             return
-        try:
-            incoming_revision = self._data_store.fetch_remote_revision()
-        except Exception:
+        if bool(getattr(self, "_supabase_revision_poll_inflight", False)):
+            return
+        worker = _SupabaseRevisionPollWorker(self._data_store)
+        thread = QThread(self.window)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_supabase_revision_polled)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_supabase_revision_poll_thread_finished)
+        self._supabase_revision_poll_worker = worker
+        self._supabase_revision_poll_thread = thread
+        self._supabase_revision_poll_inflight = True
+        thread.start()
+
+    def _on_supabase_revision_polled(self, incoming_revision: object, error: str) -> None:
+        self._supabase_revision_poll_inflight = False
+        if normalize_data_storage_backend(self._data_storage_backend, default=BACKEND_LOCAL_SQLITE) != BACKEND_SUPABASE:
+            return
+        if not isinstance(self._data_store, SupabaseDataStore):
+            return
+        if self._supabase_realtime_apply_running:
+            return
+        if str(error or "").strip():
+            self._set_supabase_connection_status("warning", "Polling failed; retrying...")
             return
         if incoming_revision is None:
+            if self._supabase_connection_state not in {"connected", "syncing"}:
+                self._set_supabase_connection_status("polling", "Polling Supabase every 2 seconds.")
             return
 
         known_revision = self._coerce_revision_value(self._data_store.known_revision, default=-1)
         if int(incoming_revision) <= known_revision:
+            if self._supabase_connection_state not in {"connected", "syncing"}:
+                self._set_supabase_connection_status("polling", "Polling Supabase every 2 seconds.")
             return
         if self._has_local_editor_in_progress():
             self._supabase_realtime_pending_refresh = True
@@ -292,6 +398,23 @@ class WindowStorageUpdateService(WindowBoundService):
                 )
             return
         self._apply_remote_supabase_refresh(trigger="poll")
+
+    def _on_supabase_revision_poll_thread_finished(self) -> None:
+        self._supabase_revision_poll_thread = None
+        self._supabase_revision_poll_worker = None
+        self._supabase_revision_poll_inflight = False
+
+    def _stop_supabase_revision_poll_job(self) -> None:
+        thread = getattr(self, "_supabase_revision_poll_thread", None)
+        if isinstance(thread, QThread):
+            try:
+                thread.quit()
+                thread.wait(250)
+            except Exception:
+                pass
+        self._supabase_revision_poll_thread = None
+        self._supabase_revision_poll_worker = None
+        self._supabase_revision_poll_inflight = False
 
     def _has_local_editor_in_progress(self) -> bool:
         if str(getattr(self, "_active_inline_form_view", "") or "").strip():
@@ -327,14 +450,47 @@ class WindowStorageUpdateService(WindowBoundService):
             return
         if not isinstance(self._data_store, SupabaseDataStore):
             return
+        if bool(getattr(self, "_supabase_refresh_inflight", False)):
+            self._supabase_realtime_pending_refresh = True
+            return
 
         self._supabase_realtime_apply_running = True
         # Consume the current pending marker. If another update arrives while we load,
         # handlers set this back to True and we immediately run one more refresh pass.
         self._supabase_realtime_pending_refresh = False
         self._supabase_realtime_pending_notice_shown = False
+        self._supabase_refresh_trigger = str(trigger or "").strip() or "refresh"
+        self._set_supabase_connection_status("syncing", "Syncing latest Supabase data...")
+        worker = _SupabaseLoadBundleWorker(self._data_store, self._data_storage_backend)
+        thread = QThread(self.window)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_supabase_refresh_loaded)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_supabase_refresh_thread_finished)
+        self._supabase_refresh_worker = worker
+        self._supabase_refresh_thread = thread
+        self._supabase_refresh_inflight = True
+        thread.start()
+
+    def _on_supabase_refresh_loaded(self, raw_result: object) -> None:
+        trigger = str(getattr(self, "_supabase_refresh_trigger", "") or "refresh")
+        load_result: DataLoadResult
+        if isinstance(raw_result, DataLoadResult):
+            load_result = raw_result
+        else:
+            load_result = DataLoadResult(
+                bundle=TrackerDataBundleV3(),
+                source="empty",
+                warning="Supabase refresh worker returned an invalid response.",
+            )
         try:
-            load_result = self._safe_load_bundle(self._data_store)
+            if normalize_data_storage_backend(self._data_storage_backend, default=BACKEND_LOCAL_SQLITE) != BACKEND_SUPABASE:
+                return
+            if not isinstance(self._data_store, SupabaseDataStore):
+                return
             if load_result.source == "empty" and load_result.warning:
                 self._state_streamer.record(
                     "data.supabase_realtime_refresh_failed",
@@ -344,11 +500,14 @@ class WindowStorageUpdateService(WindowBoundService):
                         "warning": load_result.warning,
                     },
                 )
+                self._set_supabase_connection_status("warning", "Sync failed; retrying with polling.")
                 return
 
             migrated = self._apply_tracker_bundle(load_result.bundle, refresh_ui=True)
             if migrated:
                 self._persist_tracker_data(show_error_dialog=False)
+            if self._supabase_connection_state != "connected":
+                self._set_supabase_connection_status("polling", "Polling Supabase every 2 seconds.")
             self._state_streamer.record(
                 "data.supabase_realtime_refreshed",
                 source="main_window",
@@ -360,6 +519,26 @@ class WindowStorageUpdateService(WindowBoundService):
         finally:
             self._supabase_realtime_apply_running = False
             self._flush_pending_supabase_refresh_if_ready()
+
+    def _on_supabase_refresh_thread_finished(self) -> None:
+        self._supabase_refresh_thread = None
+        self._supabase_refresh_worker = None
+        self._supabase_refresh_trigger = ""
+        self._supabase_refresh_inflight = False
+
+    def _stop_supabase_refresh_job(self) -> None:
+        thread = getattr(self, "_supabase_refresh_thread", None)
+        if isinstance(thread, QThread):
+            try:
+                thread.quit()
+                thread.wait(250)
+            except Exception:
+                pass
+        self._supabase_refresh_thread = None
+        self._supabase_refresh_worker = None
+        self._supabase_refresh_trigger = ""
+        self._supabase_refresh_inflight = False
+        self._supabase_realtime_apply_running = False
 
     def _coerce_revision_value(self, value: object, *, default: int) -> int:
         try:

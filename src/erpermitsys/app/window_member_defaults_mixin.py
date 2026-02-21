@@ -29,13 +29,23 @@ class WindowMemberDefaultsMixin:
         self._admin_layout_service_instance = None
         self._supabase_realtime_client = None
         self._supabase_revision_poll_timer = None
+        self._supabase_revision_poll_thread = None
+        self._supabase_revision_poll_worker = None
+        self._supabase_revision_poll_inflight = False
+        self._supabase_refresh_thread = None
+        self._supabase_refresh_worker = None
+        self._supabase_refresh_trigger = ""
+        self._supabase_refresh_inflight = False
         self._supabase_realtime_pending_refresh = False
         self._supabase_realtime_pending_notice_shown = False
         self._supabase_realtime_apply_running = False
+        self._supabase_connection_state = "local"
+        self._supabase_connection_message = "Using local SQLite storage."
         self._close_requested_for_update = False
 
         self._settings_button = None
         self._settings_button_shadow = None
+        self._settings_connection_bubble = None
 
         self._property_filter_combo = None
         self._property_search_input = None

@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sqlite3
+import threading
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -451,6 +452,7 @@ class SupabaseDataStore:
         self._known_revision = -1
         self._client_id = f"desktop-{uuid4().hex[:12]}"
         self._known_payload: dict[str, Any] | None = None
+        self._lock = threading.RLock()
 
     @property
     def storage_file_path(self) -> Path:
@@ -461,6 +463,10 @@ class SupabaseDataStore:
         return max(-1, int(self._known_revision))
 
     def fetch_remote_revision(self) -> int | None:
+        with self._lock:
+            return self._fetch_remote_revision_unlocked()
+
+    def _fetch_remote_revision_unlocked(self) -> int | None:
         config = self._require_config()
         table = quote(config.table, safe="_")
         app_id = quote(_APP_ID, safe="_-")
@@ -484,9 +490,14 @@ class SupabaseDataStore:
         return self._client_id
 
     def has_saved_data(self) -> bool:
-        return self._fetch_state_row() is not None
+        with self._lock:
+            return self._fetch_state_row() is not None
 
     def load_bundle(self) -> DataLoadResult:
+        with self._lock:
+            return self._load_bundle_unlocked()
+
+    def _load_bundle_unlocked(self) -> DataLoadResult:
         snapshot = self._fetch_bundle_snapshot_via_rpc()
         if snapshot is not None:
             payload, revision = snapshot
@@ -596,6 +607,10 @@ class SupabaseDataStore:
             return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
 
     def save_bundle(self, bundle: TrackerDataBundleV3) -> None:
+        with self._lock:
+            self._save_bundle_unlocked(bundle)
+
+    def _save_bundle_unlocked(self, bundle: TrackerDataBundleV3) -> None:
         config = self._require_config()
         started_at = perf_counter()
         target_payload = _normalize_bundle_payload(bundle.to_payload())

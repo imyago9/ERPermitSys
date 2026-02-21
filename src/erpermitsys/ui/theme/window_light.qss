@@ -1170,6 +1170,40 @@ QPushButton#SettingsLauncherButton:focus {
     border-color: rgba(255, 255, 255, 246);
 }
 
+QLabel#SettingsConnectionBubble {
+    border-radius: 6px;
+    border: 1px solid rgba(242, 250, 255, 242);
+    background: rgba(148, 167, 190, 236);
+}
+
+QLabel#SettingsConnectionBubble[connectionState="local"] {
+    background: rgba(150, 170, 193, 236);
+}
+
+QLabel#SettingsConnectionBubble[connectionState="connecting"] {
+    background: rgba(99, 166, 227, 242);
+}
+
+QLabel#SettingsConnectionBubble[connectionState="connected"] {
+    background: rgba(78, 194, 140, 244);
+}
+
+QLabel#SettingsConnectionBubble[connectionState="polling"] {
+    background: rgba(244, 182, 93, 244);
+}
+
+QLabel#SettingsConnectionBubble[connectionState="syncing"] {
+    background: rgba(119, 145, 233, 244);
+}
+
+QLabel#SettingsConnectionBubble[connectionState="warning"] {
+    background: rgba(243, 171, 74, 246);
+}
+
+QLabel#SettingsConnectionBubble[connectionState="error"] {
+    background: rgba(232, 96, 96, 246);
+}
+
 QFrame#FramelessDialogFrame {
     background: rgba(244, 249, 255, 248);
     border: 1px solid rgba(139, 170, 205, 214);

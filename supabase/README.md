@@ -11,6 +11,7 @@ This project keeps SQL migrations in two folders:
 - `002_erpermitsys_realtime_revision.sql` / `20260220153000_erpermitsys_realtime_revision.sql`
 - `003_erpermitsys_relational_snapshot.sql` / `20260221110000_erpermitsys_relational_snapshot.sql`
 - `004_erpermitsys_incremental_sync.sql` / `20260221153000_erpermitsys_incremental_sync.sql`
+- `005_erpermitsys_payload_delta_and_tombstone_retention.sql` / `20260221170000_erpermitsys_payload_delta_and_tombstone_retention.sql`
 
 These migrations create the shared state metadata row, normalized snapshot tables, and storage policies required by the app:
 
@@ -27,6 +28,8 @@ These migrations create the shared state metadata row, normalized snapshot table
 - atomic snapshot RPC `public.erpermitsys_save_snapshot(...)` used by desktop clients
 - incremental per-record sync RPCs (`public.erpermitsys_fetch_snapshot(...)`, `public.erpermitsys_apply_changes(...)`)
 - tombstone delete support on entity tables via `deleted_at` so deletes replicate safely across clients
+- periodic tombstone pruning (retention cleanup) to prevent unbounded soft-delete growth
+- incremental `payload` mirror updates without full table snapshot rebuilds on every write
 
 `public.erpermitsys_state.payload` is retained as a compatibility mirror for older clients,
 but current builds read/write the relational tables through incremental RPC updates.

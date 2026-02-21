@@ -102,6 +102,14 @@ class WindowOverlayMixin:
         self._settings_button = button
         self._apply_settings_button_effect()
 
+        connection_bubble = QLabel(scene)
+        connection_bubble.setObjectName("SettingsConnectionBubble")
+        connection_bubble.setProperty("connectionState", "local")
+        connection_bubble.setToolTip("Using local SQLite storage.")
+        connection_bubble.setFixedSize(12, 12)
+        connection_bubble.hide()
+        self._settings_connection_bubble = connection_bubble
+
         self._build_tracker_overlay(scene)
 
         page_layout.addWidget(scene, 1)
