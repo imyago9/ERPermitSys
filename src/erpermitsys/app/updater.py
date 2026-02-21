@@ -420,6 +420,7 @@ exit 0
 _WINDOWS_INSTALLER_LAUNCH_SCRIPT = """param(
     [int]$AppPid,
     [string]$InstallerPath,
+    [string]$ExecutablePath,
     [string]$LogPath
 )
 
@@ -433,6 +434,7 @@ function Write-Log([string]$Message) {
 New-Item -Path (Split-Path -Parent $LogPath) -ItemType Directory -Force | Out-Null
 Write-Log "Installer launcher started."
 Write-Log "InstallerPath=$InstallerPath"
+Write-Log "ExecutablePath=$ExecutablePath"
 
 for ($attempt = 0; $attempt -lt 180; $attempt++) {
     if (-not (Get-Process -Id $AppPid -ErrorAction SilentlyContinue)) {
@@ -443,11 +445,27 @@ for ($attempt = 0; $attempt -lt 180; $attempt++) {
 }
 
 try {
-    Start-Process -FilePath $InstallerPath | Out-Null
-    Write-Log "Installer launched."
+    $installerArgs = @("/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+    $proc = Start-Process -FilePath $InstallerPath -ArgumentList $installerArgs -Wait -PassThru -WindowStyle Hidden
+    $exitCode = 0
+    if ($null -ne $proc) {
+        $exitCode = $proc.ExitCode
+    }
+    Write-Log "Installer exited with code $exitCode."
+    if ($exitCode -ne 0) {
+        exit $exitCode
+    }
+} catch {
+    Write-Log "Installer run failed: $($_.Exception.Message)"
+    exit 1
+}
+
+try {
+    Start-Process -FilePath $ExecutablePath | Out-Null
+    Write-Log "Executable relaunched."
     exit 0
 } catch {
-    Write-Log "Installer launch failed: $($_.Exception.Message)"
+    Write-Log "Executable relaunch failed: $($_.Exception.Message)"
     exit 1
 }
 """
@@ -546,14 +564,18 @@ def launch_windows_zip_updater(
 def launch_windows_installer_updater(
     *,
     installer_path: Path,
+    executable_path: Path,
     app_pid: int,
 ) -> tuple[bool, str]:
     if os.name != "nt":
         return False, "Installer launcher currently supports Windows only."
 
     installer = Path(installer_path).expanduser().resolve()
+    executable = Path(executable_path).expanduser().resolve()
     if not installer.exists():
         return False, f"Downloaded installer was not found: {installer}"
+    if not executable.exists():
+        return False, f"Executable was not found: {executable}"
 
     try:
         work_dir = Path(tempfile.mkdtemp(prefix="erpermitsys_installer_"))
@@ -574,6 +596,8 @@ def launch_windows_installer_updater(
             str(int(app_pid)),
             "-InstallerPath",
             str(installer),
+            "-ExecutablePath",
+            str(executable),
             "-LogPath",
             str(log_path),
         ]

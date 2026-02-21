@@ -1119,7 +1119,23 @@ class WindowStorageUpdateService(WindowBoundService):
                 cancel_text="Later",
             )
             if confirm:
-                self._download_and_apply_update(info)
+                try:
+                    self._download_and_apply_update(info)
+                except Exception as exc:
+                    self._set_update_settings_status("Update failed to start.", checking=False)
+                    self._state_streamer.record(
+                        "updates.apply_failed",
+                        source="main_window",
+                        payload={
+                            "latest_version": info.latest_version,
+                            "error": str(exc),
+                        },
+                    )
+                    self._show_warning_dialog(
+                        "Update Failed",
+                        "The update could not be started.\n\n"
+                        f"{exc}",
+                    )
             else:
                 self._set_update_settings_status("Update postponed.", checking=False)
             return
@@ -1178,7 +1194,7 @@ class WindowStorageUpdateService(WindowBoundService):
         is_installer = str(asset_name or "").strip().lower().endswith(".exe")
         title = "Downloading Installer" if is_installer else "Downloading Update"
         label = "Downloading installer..." if is_installer else f"Downloading {asset_name}..."
-        parent = self._settings_dialog if self._settings_dialog is not None else self
+        parent = self._settings_dialog if self._settings_dialog is not None else self.window
         dialog = QProgressDialog(parent)
         dialog.setWindowTitle(title)
         dialog.setLabelText(label)
@@ -1274,6 +1290,7 @@ class WindowStorageUpdateService(WindowBoundService):
         if can_self_update_windows() and is_installer:
             started, launcher_detail = launch_windows_installer_updater(
                 installer_path=downloaded_file,
+                executable_path=Path(sys.executable).resolve(),
                 app_pid=int(QApplication.applicationPid()),
             )
             if not started:
