@@ -29,6 +29,8 @@ _APP_ID = "erpermitsys"
 _DEFAULT_SUPABASE_SCHEMA = "public"
 _DEFAULT_SUPABASE_TABLE = "erpermitsys_state"
 _DEFAULT_SUPABASE_TIMEOUT_SECONDS = 8.0
+_SUPABASE_FETCH_SNAPSHOT_RPC = "erpermitsys_fetch_snapshot"
+_SUPABASE_APPLY_CHANGES_RPC = "erpermitsys_apply_changes"
 _SUPABASE_SNAPSHOT_RPC = "erpermitsys_save_snapshot"
 _SUPABASE_CONTACTS_TABLE = "erpermitsys_contacts"
 _SUPABASE_JURISDICTIONS_TABLE = "erpermitsys_jurisdictions"
@@ -36,6 +38,7 @@ _SUPABASE_PROPERTIES_TABLE = "erpermitsys_properties"
 _SUPABASE_PERMITS_TABLE = "erpermitsys_permits"
 _SUPABASE_DOCUMENT_TEMPLATES_TABLE = "erpermitsys_document_templates"
 _SUPABASE_ACTIVE_TEMPLATE_MAP_TABLE = "erpermitsys_active_document_templates"
+_SUPABASE_PAGE_SIZE = 1_000
 _LOCAL_SQLITE_TABLE = "app_state"
 
 
@@ -447,6 +450,7 @@ class SupabaseDataStore:
         self._config = config or SupabaseDataStoreConfig()
         self._known_revision = -1
         self._client_id = f"desktop-{uuid4().hex[:12]}"
+        self._known_payload: dict[str, Any] | None = None
 
     @property
     def storage_file_path(self) -> Path:
@@ -483,9 +487,38 @@ class SupabaseDataStore:
         return self._fetch_state_row() is not None
 
     def load_bundle(self) -> DataLoadResult:
+        snapshot = self._fetch_bundle_snapshot_via_rpc()
+        if snapshot is not None:
+            payload, revision = snapshot
+            try:
+                bundle = TrackerDataBundleV3.from_payload(payload)
+            except Exception as exc:
+                warning = f"Supabase snapshot payload is invalid: {exc}"
+                db_debug(
+                    "supabase.load.payload_invalid",
+                    table=self._config.table,
+                    revision=revision,
+                    error=str(exc),
+                    source="snapshot_rpc",
+                )
+                self._known_revision = revision
+                self._known_payload = _empty_bundle_payload()
+                return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
+
+            self._known_revision = revision
+            self._known_payload = bundle.to_payload()
+            db_debug(
+                "supabase.load",
+                table=self._config.table,
+                source="snapshot_rpc",
+                revision=self._known_revision,
+            )
+            return DataLoadResult(bundle=bundle, source="primary")
+
         state_row = self._fetch_state_row()
         if state_row is None:
             self._known_revision = -1
+            self._known_payload = _empty_bundle_payload()
             db_debug(
                 "supabase.load",
                 table=self._config.table,
@@ -511,6 +544,7 @@ class SupabaseDataStore:
                         revision=self._known_revision,
                         reason="tables_empty",
                     )
+                    self._known_payload = legacy_bundle.to_payload()
                     return DataLoadResult(bundle=legacy_bundle, source="primary", warning=warning)
             db_debug(
                 "supabase.load",
@@ -518,6 +552,7 @@ class SupabaseDataStore:
                 source="tables",
                 revision=self._known_revision,
             )
+            self._known_payload = bundle.to_payload()
             return DataLoadResult(bundle=bundle, source="primary")
         except Exception as exc:
             legacy_payload = state_row.get("payload")
@@ -534,6 +569,7 @@ class SupabaseDataStore:
                         revision=self._known_revision,
                         error=str(exc),
                     )
+                    self._known_payload = bundle.to_payload()
                     return DataLoadResult(bundle=bundle, source="primary", warning=warning)
                 except Exception as legacy_exc:
                     warning = f"Supabase legacy payload is invalid: {legacy_exc}"
@@ -543,6 +579,7 @@ class SupabaseDataStore:
                         revision=self._known_revision,
                         error=str(legacy_exc),
                     )
+                    self._known_payload = _empty_bundle_payload()
                     return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
 
             warning = (
@@ -555,53 +592,243 @@ class SupabaseDataStore:
                 revision=self._known_revision,
                 error=str(exc),
             )
+            self._known_payload = _empty_bundle_payload()
             return DataLoadResult(bundle=TrackerDataBundleV3(), source="empty", warning=warning)
 
     def save_bundle(self, bundle: TrackerDataBundleV3) -> None:
         config = self._require_config()
         started_at = perf_counter()
-
-        if self._known_revision < 0:
-            existing_row = self._fetch_state_row()
-            if existing_row is not None:
-                self._known_revision = _coerce_non_negative_int(existing_row.get("revision"), default=0)
-            else:
+        target_payload = _normalize_bundle_payload(bundle.to_payload())
+        if self._known_payload is None or self._known_revision < 0:
+            load_result = self.load_bundle()
+            self._known_payload = load_result.bundle.to_payload()
+            if self._known_revision < 0:
                 self._known_revision = 0
 
-        expected_revision = max(0, int(self._known_revision))
-        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        payload = bundle.to_payload()
-
-        if self._save_bundle_via_rpc(
-            payload=payload,
-            expected_revision=expected_revision,
-            saved_at_utc=now_iso,
-        ):
+        base_payload = _normalize_bundle_payload(self._known_payload or _empty_bundle_payload())
+        if base_payload == target_payload:
             db_debug(
-                "supabase.save",
+                "supabase.save.noop",
                 table=config.table,
-                mode="snapshot_rpc",
-                expected_revision=expected_revision,
+                mode="unchanged",
                 revision=self._known_revision,
                 duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
             )
             return
 
-        self._save_bundle_legacy_payload(payload=payload, expected_revision=expected_revision, saved_at_utc=now_iso)
-        db_debug(
-            "supabase.save",
-            table=config.table,
-            mode="legacy_payload",
-            expected_revision=expected_revision,
-            revision=self._known_revision,
-            duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
-        )
+        changes = _build_bundle_change_set(base_payload, target_payload)
+        if _bundle_change_set_is_empty(changes):
+            self._known_payload = target_payload
+            db_debug(
+                "supabase.save.noop",
+                table=config.table,
+                mode="empty_change_set",
+                revision=self._known_revision,
+                duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
+            )
+            return
+
+        expected_revision = max(0, int(self._known_revision))
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        max_attempts = 5
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if self._save_changes_via_rpc(
+                    changes=changes,
+                    expected_revision=expected_revision,
+                    saved_at_utc=now_iso,
+                ):
+                    self._known_payload = _apply_bundle_change_set(base_payload, changes)
+                    db_debug(
+                        "supabase.save",
+                        table=config.table,
+                        mode="changes_rpc",
+                        expected_revision=expected_revision,
+                        revision=self._known_revision,
+                        attempt=attempt,
+                        duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
+                    )
+                    return
+
+                if self._save_bundle_via_rpc(
+                    payload=target_payload,
+                    expected_revision=expected_revision,
+                    saved_at_utc=now_iso,
+                ):
+                    self._known_payload = target_payload
+                    db_debug(
+                        "supabase.save",
+                        table=config.table,
+                        mode="snapshot_rpc",
+                        expected_revision=expected_revision,
+                        revision=self._known_revision,
+                        attempt=attempt,
+                        duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
+                    )
+                    return
+
+                self._save_bundle_legacy_payload(
+                    payload=target_payload,
+                    expected_revision=expected_revision,
+                    saved_at_utc=now_iso,
+                )
+                self._known_payload = target_payload
+                db_debug(
+                    "supabase.save",
+                    table=config.table,
+                    mode="legacy_payload",
+                    expected_revision=expected_revision,
+                    revision=self._known_revision,
+                    attempt=attempt,
+                    duration_ms=round((perf_counter() - started_at) * 1000.0, 2),
+                )
+                return
+            except SupabaseRevisionConflictError as conflict:
+                snapshot = self._fetch_bundle_snapshot_via_rpc()
+                if snapshot is None:
+                    load_result = self.load_bundle()
+                    remote_payload = load_result.bundle.to_payload()
+                    remote_revision = max(0, int(self._known_revision))
+                else:
+                    remote_payload, remote_revision = snapshot
+
+                rebased_target_payload = _apply_bundle_change_set(remote_payload, changes)
+                if rebased_target_payload == remote_payload:
+                    self._known_payload = _normalize_bundle_payload(remote_payload)
+                    self._known_revision = max(0, int(remote_revision))
+                    db_debug(
+                        "supabase.save.noop_after_conflict",
+                        table=config.table,
+                        expected_revision=conflict.expected_revision,
+                        revision=self._known_revision,
+                        attempt=attempt,
+                    )
+                    return
+
+                base_payload = _normalize_bundle_payload(remote_payload)
+                target_payload = _normalize_bundle_payload(rebased_target_payload)
+                changes = _build_bundle_change_set(base_payload, target_payload)
+                expected_revision = max(0, int(remote_revision))
+                if _bundle_change_set_is_empty(changes):
+                    self._known_payload = base_payload
+                    self._known_revision = expected_revision
+                    return
+                continue
+
+        raise SupabaseRevisionConflictError(expected_revision=expected_revision)
+
+    def _fetch_bundle_snapshot_via_rpc(self) -> tuple[dict[str, Any], int] | None:
+        rpc_path = f"/rest/v1/rpc/{quote(_SUPABASE_FETCH_SNAPSHOT_RPC, safe='_')}"
+        try:
+            raw = self._request_json(
+                method="POST",
+                path=rpc_path,
+                payload={"p_app_id": _APP_ID},
+                prefer="",
+                expect_json=True,
+            )
+        except RuntimeError as exc:
+            if _is_missing_rpc_function_error(exc):
+                return None
+            raise
+
+        result = raw
+        if isinstance(raw, list):
+            if raw and isinstance(raw[0], dict):
+                result = raw[0]
+            else:
+                result = None
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                f"Supabase fetch snapshot RPC returned an invalid response type: {type(raw).__name__}"
+            )
+
+        revision = _coerce_non_negative_int(result.get("revision"), default=0)
+        payload = result.get("payload")
+        if not isinstance(payload, dict):
+            payload = _empty_bundle_payload()
+        return _normalize_bundle_payload(payload), revision
+
+    def _save_changes_via_rpc(
+        self,
+        *,
+        changes: dict[str, Any],
+        expected_revision: int,
+        saved_at_utc: str,
+    ) -> bool:
+        rpc_path = f"/rest/v1/rpc/{quote(_SUPABASE_APPLY_CHANGES_RPC, safe='_')}"
+        rpc_payload = {
+            "p_app_id": _APP_ID,
+            "p_expected_revision": int(expected_revision),
+            "p_schema_version": int(_SCHEMA_VERSION),
+            "p_saved_at_utc": saved_at_utc,
+            "p_updated_by": self._client_id,
+            "p_contacts_upserts": changes.get("contacts_upserts", []),
+            "p_contacts_deletes": changes.get("contacts_deletes", []),
+            "p_jurisdictions_upserts": changes.get("jurisdictions_upserts", []),
+            "p_jurisdictions_deletes": changes.get("jurisdictions_deletes", []),
+            "p_properties_upserts": changes.get("properties_upserts", []),
+            "p_properties_deletes": changes.get("properties_deletes", []),
+            "p_permits_upserts": changes.get("permits_upserts", []),
+            "p_permits_deletes": changes.get("permits_deletes", []),
+            "p_document_templates_upserts": changes.get("document_templates_upserts", []),
+            "p_document_templates_deletes": changes.get("document_templates_deletes", []),
+            "p_active_document_template_ids_upserts": changes.get("active_document_template_ids_upserts", []),
+            "p_active_document_template_ids_deletes": changes.get("active_document_template_ids_deletes", []),
+        }
+        try:
+            raw = self._request_json(
+                method="POST",
+                path=rpc_path,
+                payload=rpc_payload,
+                prefer="",
+                expect_json=True,
+            )
+        except RuntimeError as exc:
+            if _is_missing_rpc_function_error(exc):
+                db_debug(
+                    "supabase.save.apply_changes_rpc_missing",
+                    table=self._config.table,
+                    rpc=_SUPABASE_APPLY_CHANGES_RPC,
+                )
+                return False
+            raise
+
+        result = raw
+        if isinstance(raw, list):
+            if raw and isinstance(raw[0], dict):
+                result = raw[0]
+            else:
+                result = None
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                f"Supabase apply changes RPC returned an invalid response type: {type(raw).__name__}"
+            )
+
+        conflict = bool(result.get("conflict"))
+        revision = _coerce_non_negative_int(result.get("revision"), default=expected_revision)
+        applied = bool(result.get("applied"))
+        self._known_revision = revision
+        if conflict:
+            db_debug(
+                "supabase.save.conflict",
+                table=self._config.table,
+                expected_revision=expected_revision,
+                known_revision=self._known_revision,
+                via="apply_changes_rpc",
+            )
+            raise SupabaseRevisionConflictError(expected_revision=expected_revision)
+        if not applied:
+            raise RuntimeError("Supabase apply changes RPC rejected the mutation payload.")
+        return True
 
     def _load_payload_from_tables(self) -> dict[str, Any]:
         contacts_rows = self._fetch_table_rows(
             table=_SUPABASE_CONTACTS_TABLE,
             select="contact_id,name,numbers,emails,roles,contact_methods,list_color",
             order="contact_id.asc",
+            exclude_deleted=True,
         )
         jurisdictions_rows = self._fetch_table_rows(
             table=_SUPABASE_JURISDICTIONS_TABLE,
@@ -610,6 +837,7 @@ class SupabaseDataStore:
                 "portal_vendor,notes,list_color"
             ),
             order="jurisdiction_id.asc",
+            exclude_deleted=True,
         )
         properties_rows = self._fetch_table_rows(
             table=_SUPABASE_PROPERTIES_TABLE,
@@ -618,6 +846,7 @@ class SupabaseDataStore:
                 "list_color,tags,notes"
             ),
             order="property_id.asc",
+            exclude_deleted=True,
         )
         permits_rows = self._fetch_table_rows(
             table=_SUPABASE_PERMITS_TABLE,
@@ -627,16 +856,19 @@ class SupabaseDataStore:
                 "document_slots,document_folders,documents"
             ),
             order="permit_id.asc",
+            exclude_deleted=True,
         )
         templates_rows = self._fetch_table_rows(
             table=_SUPABASE_DOCUMENT_TEMPLATES_TABLE,
             select="template_id,name,permit_type,slots,notes",
             order="template_id.asc",
+            exclude_deleted=True,
         )
         template_map_rows = self._fetch_table_rows(
             table=_SUPABASE_ACTIVE_TEMPLATE_MAP_TABLE,
             select="permit_type,template_id",
             order="permit_type.asc",
+            exclude_deleted=True,
         )
 
         contacts: list[dict[str, Any]] = []
@@ -942,26 +1174,45 @@ class SupabaseDataStore:
         table: str,
         select: str,
         order: str = "",
+        exclude_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         safe_table = quote(table, safe="_")
         app_id = quote(_APP_ID, safe="_-")
         query = f"?select={select}&app_id=eq.{app_id}"
         if order:
             query = f"{query}&order={order}"
-        rows = self._request_json(
-            method="GET",
-            path=f"/rest/v1/{safe_table}",
-            query=query,
-            payload=None,
-            prefer="",
-            expect_json=True,
-        )
-        if not isinstance(rows, list):
-            return []
+        if exclude_deleted:
+            query = f"{query}&deleted_at=is.null"
         normalized: list[dict[str, Any]] = []
-        for item in rows:
-            if isinstance(item, dict):
-                normalized.append(item)
+        offset = 0
+        while True:
+            paged_query = f"{query}&limit={_SUPABASE_PAGE_SIZE}&offset={offset}"
+            try:
+                rows = self._request_json(
+                    method="GET",
+                    path=f"/rest/v1/{safe_table}",
+                    query=paged_query,
+                    payload=None,
+                    prefer="",
+                    expect_json=True,
+                )
+            except RuntimeError as exc:
+                if exclude_deleted and _is_missing_deleted_at_column_error(exc):
+                    return self._fetch_table_rows(
+                        table=table,
+                        select=select,
+                        order=order,
+                        exclude_deleted=False,
+                    )
+                raise
+            if not isinstance(rows, list) or not rows:
+                break
+            for item in rows:
+                if isinstance(item, dict):
+                    normalized.append(item)
+            if len(rows) < _SUPABASE_PAGE_SIZE:
+                break
+            offset += _SUPABASE_PAGE_SIZE
         return normalized
 
     def _request_json(
@@ -1082,6 +1333,262 @@ def _build_storage_payload(
     }
 
 
+def _empty_bundle_payload() -> dict[str, Any]:
+    return {
+        "contacts": [],
+        "jurisdictions": [],
+        "properties": [],
+        "permits": [],
+        "document_templates": [],
+        "active_document_template_ids": {},
+    }
+
+
+def _normalize_bundle_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    try:
+        normalized = TrackerDataBundleV3.from_payload(payload or {})
+    except Exception:
+        normalized = TrackerDataBundleV3()
+    return normalized.to_payload()
+
+
+def _row_collection_by_id(rows: object, *, id_key: str) -> dict[str, dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+    if not isinstance(rows, list):
+        return indexed
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_id = str(row.get(id_key, "") or "").strip()
+        if not row_id:
+            continue
+        indexed[row_id] = dict(row)
+    return indexed
+
+
+def _diff_row_collection(
+    previous_rows: object,
+    current_rows: object,
+    *,
+    id_key: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    previous = _row_collection_by_id(previous_rows, id_key=id_key)
+    current = _row_collection_by_id(current_rows, id_key=id_key)
+
+    upserts: list[dict[str, Any]] = []
+    deletes: list[str] = []
+    for row_id in sorted(current):
+        current_row = current[row_id]
+        previous_row = previous.get(row_id)
+        if previous_row == current_row:
+            continue
+        upserts.append(current_row)
+
+    for row_id in sorted(previous):
+        if row_id not in current:
+            deletes.append(row_id)
+    return upserts, deletes
+
+
+def _diff_active_template_map(
+    previous_map: object,
+    current_map: object,
+) -> tuple[list[dict[str, str]], list[str]]:
+    previous = previous_map if isinstance(previous_map, dict) else {}
+    current = current_map if isinstance(current_map, dict) else {}
+
+    upserts: list[dict[str, str]] = []
+    deletes: list[str] = []
+    for permit_type in sorted(str(key).strip() for key in current.keys()):
+        if not permit_type:
+            continue
+        template_id = str(current.get(permit_type, "") or "").strip()
+        previous_template_id = str(previous.get(permit_type, "") or "").strip()
+        if not template_id:
+            continue
+        if template_id == previous_template_id:
+            continue
+        upserts.append({"permit_type": permit_type, "template_id": template_id})
+
+    for permit_type in sorted(str(key).strip() for key in previous.keys()):
+        if not permit_type:
+            continue
+        if permit_type not in current:
+            deletes.append(permit_type)
+    return upserts, deletes
+
+
+def _build_bundle_change_set(
+    previous_payload: dict[str, Any],
+    current_payload: dict[str, Any],
+) -> dict[str, Any]:
+    previous = _normalize_bundle_payload(previous_payload)
+    current = _normalize_bundle_payload(current_payload)
+
+    contacts_upserts, contacts_deletes = _diff_row_collection(
+        previous.get("contacts"),
+        current.get("contacts"),
+        id_key="contact_id",
+    )
+    jurisdictions_upserts, jurisdictions_deletes = _diff_row_collection(
+        previous.get("jurisdictions"),
+        current.get("jurisdictions"),
+        id_key="jurisdiction_id",
+    )
+    properties_upserts, properties_deletes = _diff_row_collection(
+        previous.get("properties"),
+        current.get("properties"),
+        id_key="property_id",
+    )
+    permits_upserts, permits_deletes = _diff_row_collection(
+        previous.get("permits"),
+        current.get("permits"),
+        id_key="permit_id",
+    )
+    templates_upserts, templates_deletes = _diff_row_collection(
+        previous.get("document_templates"),
+        current.get("document_templates"),
+        id_key="template_id",
+    )
+    active_upserts, active_deletes = _diff_active_template_map(
+        previous.get("active_document_template_ids"),
+        current.get("active_document_template_ids"),
+    )
+    return {
+        "contacts_upserts": contacts_upserts,
+        "contacts_deletes": contacts_deletes,
+        "jurisdictions_upserts": jurisdictions_upserts,
+        "jurisdictions_deletes": jurisdictions_deletes,
+        "properties_upserts": properties_upserts,
+        "properties_deletes": properties_deletes,
+        "permits_upserts": permits_upserts,
+        "permits_deletes": permits_deletes,
+        "document_templates_upserts": templates_upserts,
+        "document_templates_deletes": templates_deletes,
+        "active_document_template_ids_upserts": active_upserts,
+        "active_document_template_ids_deletes": active_deletes,
+    }
+
+
+def _bundle_change_set_is_empty(change_set: dict[str, Any]) -> bool:
+    keys = (
+        "contacts_upserts",
+        "contacts_deletes",
+        "jurisdictions_upserts",
+        "jurisdictions_deletes",
+        "properties_upserts",
+        "properties_deletes",
+        "permits_upserts",
+        "permits_deletes",
+        "document_templates_upserts",
+        "document_templates_deletes",
+        "active_document_template_ids_upserts",
+        "active_document_template_ids_deletes",
+    )
+    return all(not bool(change_set.get(key)) for key in keys)
+
+
+def _apply_row_collection_change_set(
+    base_rows: object,
+    *,
+    id_key: str,
+    upserts: object,
+    deletes: object,
+) -> list[dict[str, Any]]:
+    merged = _row_collection_by_id(base_rows, id_key=id_key)
+    if isinstance(upserts, list):
+        for row in upserts:
+            if not isinstance(row, dict):
+                continue
+            row_id = str(row.get(id_key, "") or "").strip()
+            if not row_id:
+                continue
+            merged[row_id] = dict(row)
+    delete_ids: list[str] = []
+    if isinstance(deletes, list):
+        for value in deletes:
+            row_id = str(value or "").strip()
+            if row_id:
+                delete_ids.append(row_id)
+    for row_id in delete_ids:
+        merged.pop(row_id, None)
+    return [merged[row_id] for row_id in sorted(merged)]
+
+
+def _apply_active_template_map_change_set(
+    base_map: object,
+    *,
+    upserts: object,
+    deletes: object,
+) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    if isinstance(base_map, dict):
+        for key, value in base_map.items():
+            permit_type = str(key or "").strip()
+            template_id = str(value or "").strip()
+            if permit_type and template_id:
+                merged[permit_type] = template_id
+
+    if isinstance(upserts, list):
+        for row in upserts:
+            if not isinstance(row, dict):
+                continue
+            permit_type = str(row.get("permit_type", "") or "").strip()
+            template_id = str(row.get("template_id", "") or "").strip()
+            if not permit_type or not template_id:
+                continue
+            merged[permit_type] = template_id
+
+    if isinstance(deletes, list):
+        for value in deletes:
+            permit_type = str(value or "").strip()
+            if permit_type:
+                merged.pop(permit_type, None)
+    return dict(sorted(merged.items()))
+
+
+def _apply_bundle_change_set(base_payload: dict[str, Any], change_set: dict[str, Any]) -> dict[str, Any]:
+    base = _normalize_bundle_payload(base_payload)
+    merged = {
+        "contacts": _apply_row_collection_change_set(
+            base.get("contacts"),
+            id_key="contact_id",
+            upserts=change_set.get("contacts_upserts"),
+            deletes=change_set.get("contacts_deletes"),
+        ),
+        "jurisdictions": _apply_row_collection_change_set(
+            base.get("jurisdictions"),
+            id_key="jurisdiction_id",
+            upserts=change_set.get("jurisdictions_upserts"),
+            deletes=change_set.get("jurisdictions_deletes"),
+        ),
+        "properties": _apply_row_collection_change_set(
+            base.get("properties"),
+            id_key="property_id",
+            upserts=change_set.get("properties_upserts"),
+            deletes=change_set.get("properties_deletes"),
+        ),
+        "permits": _apply_row_collection_change_set(
+            base.get("permits"),
+            id_key="permit_id",
+            upserts=change_set.get("permits_upserts"),
+            deletes=change_set.get("permits_deletes"),
+        ),
+        "document_templates": _apply_row_collection_change_set(
+            base.get("document_templates"),
+            id_key="template_id",
+            upserts=change_set.get("document_templates_upserts"),
+            deletes=change_set.get("document_templates_deletes"),
+        ),
+        "active_document_template_ids": _apply_active_template_map_change_set(
+            base.get("active_document_template_ids"),
+            upserts=change_set.get("active_document_template_ids_upserts"),
+            deletes=change_set.get("active_document_template_ids_deletes"),
+        ),
+    }
+    return _normalize_bundle_payload(merged)
+
+
 def _coerce_non_negative_int(value: object, *, default: int) -> int:
     try:
         parsed = int(value)  # type: ignore[arg-type]
@@ -1109,6 +1616,11 @@ def _is_postgrest_conflict_error(exc: RuntimeError) -> bool:
 def _is_missing_rpc_function_error(exc: RuntimeError) -> bool:
     text = str(exc).casefold()
     return "could not find the function" in text or "pgrst202" in text or "404 not found" in text
+
+
+def _is_missing_deleted_at_column_error(exc: RuntimeError) -> bool:
+    text = str(exc).casefold()
+    return "deleted_at" in text and "does not exist" in text
 
 
 def _bundle_has_content(bundle: TrackerDataBundleV3) -> bool:

@@ -57,7 +57,7 @@ from erpermitsys.app.updater import (
 from erpermitsys.app.window_bound_service import WindowBoundService
 
 
-_SUPABASE_REVISION_POLL_INTERVAL_MS = 5_000
+_SUPABASE_REVISION_POLL_INTERVAL_MS = 2_000
 
 
 class WindowStorageUpdateService(WindowBoundService):
@@ -228,6 +228,7 @@ class WindowStorageUpdateService(WindowBoundService):
         if incoming_revision <= known_revision:
             return
         if self._supabase_realtime_apply_running:
+            self._supabase_realtime_pending_refresh = True
             return
         if self._has_local_editor_in_progress():
             self._supabase_realtime_pending_refresh = True
@@ -256,6 +257,7 @@ class WindowStorageUpdateService(WindowBoundService):
         if timer.isActive():
             return
         timer.start()
+        QTimer.singleShot(0, self._on_supabase_revision_poll_tick)
 
     def _stop_supabase_revision_polling(self) -> None:
         timer = getattr(self, "_supabase_revision_poll_timer", None)
@@ -327,6 +329,10 @@ class WindowStorageUpdateService(WindowBoundService):
             return
 
         self._supabase_realtime_apply_running = True
+        # Consume the current pending marker. If another update arrives while we load,
+        # handlers set this back to True and we immediately run one more refresh pass.
+        self._supabase_realtime_pending_refresh = False
+        self._supabase_realtime_pending_notice_shown = False
         try:
             load_result = self._safe_load_bundle(self._data_store)
             if load_result.source == "empty" and load_result.warning:
@@ -343,8 +349,6 @@ class WindowStorageUpdateService(WindowBoundService):
             migrated = self._apply_tracker_bundle(load_result.bundle, refresh_ui=True)
             if migrated:
                 self._persist_tracker_data(show_error_dialog=False)
-            self._supabase_realtime_pending_refresh = False
-            self._supabase_realtime_pending_notice_shown = False
             self._state_streamer.record(
                 "data.supabase_realtime_refreshed",
                 source="main_window",
@@ -355,6 +359,7 @@ class WindowStorageUpdateService(WindowBoundService):
             )
         finally:
             self._supabase_realtime_apply_running = False
+            self._flush_pending_supabase_refresh_if_ready()
 
     def _coerce_revision_value(self, value: object, *, default: int) -> int:
         try:
