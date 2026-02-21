@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,31 @@ from typing import Iterable
 from erpermitsys.app.runtime_paths import app_root
 
 _REWRITE_ROOT = app_root()
-_SETTINGS_PATH = _REWRITE_ROOT / "config" / "settings.json"
+_APP_SETTINGS_DIRNAME = "erpermitsys"
+_LEGACY_SETTINGS_PATH = _REWRITE_ROOT / "config" / "settings.json"
+
+
+def _resolve_settings_path() -> Path:
+    env = os.environ
+    if os.name == "nt":
+        appdata = str(env.get("APPDATA", "") or "").strip()
+        if appdata:
+            return Path(appdata) / _APP_SETTINGS_DIRNAME / "config" / "settings.json"
+        localappdata = str(env.get("LOCALAPPDATA", "") or "").strip()
+        if localappdata:
+            return Path(localappdata) / _APP_SETTINGS_DIRNAME / "config" / "settings.json"
+    else:
+        xdg_config_home = str(env.get("XDG_CONFIG_HOME", "") or "").strip()
+        if xdg_config_home:
+            return Path(xdg_config_home) / _APP_SETTINGS_DIRNAME / "settings.json"
+        home = str(env.get("HOME", "") or "").strip()
+        if home:
+            return Path(home) / ".config" / _APP_SETTINGS_DIRNAME / "settings.json"
+
+    return _LEGACY_SETTINGS_PATH
+
+
+_SETTINGS_PATH = _resolve_settings_path()
 _DARK_MODE_KEY = "darkMode"
 _PALETTE_ENABLED_KEY = "paletteShortcutEnabled"
 _PALETTE_KEYBIND_KEY = "paletteShortcutKeybind"
@@ -75,7 +100,29 @@ def settings_path() -> Path:
     return _SETTINGS_PATH
 
 
+def _maybe_migrate_legacy_settings() -> None:
+    target = _SETTINGS_PATH
+    legacy = _LEGACY_SETTINGS_PATH
+    if target == legacy or target.exists() or not legacy.exists():
+        return
+
+    try:
+        raw = legacy.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
 def load_settings() -> dict[str, Any]:
+    _maybe_migrate_legacy_settings()
     path = settings_path()
     if not path.exists():
         return {}
@@ -90,6 +137,7 @@ def load_settings() -> dict[str, Any]:
 
 
 def save_settings(settings: dict[str, Any]) -> None:
+    _maybe_migrate_legacy_settings()
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
