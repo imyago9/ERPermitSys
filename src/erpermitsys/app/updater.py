@@ -445,8 +445,8 @@ for ($attempt = 0; $attempt -lt 180; $attempt++) {
 }
 
 try {
-    $installerArgs = @("/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
-    $proc = Start-Process -FilePath $InstallerPath -ArgumentList $installerArgs -Wait -PassThru -WindowStyle Hidden
+    $installerArgs = @("/SP-", "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+    $proc = Start-Process -FilePath $InstallerPath -ArgumentList $installerArgs -Wait -PassThru -WindowStyle Normal
     $exitCode = 0
     if ($null -ne $proc) {
         $exitCode = $proc.ExitCode
