@@ -133,6 +133,11 @@ jobs:
 
           archive = CArchiveReader(str(exe_path))
           pyz = archive.open_embedded_archive("PYZ.pyz")
+          ui_modules = sorted(name for name in pyz.toc if name.startswith("erpermitsys.ui"))
+          print("Bundled erpermitsys.ui modules:")
+          for name in ui_modules:
+              print(f" - {name}")
+
           required_modules = (
               "erpermitsys.app.main",
               "erpermitsys.app.window_shell_mixin",

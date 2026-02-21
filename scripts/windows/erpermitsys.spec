@@ -4,12 +4,19 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PyInstaller.building.datastruct import TOC
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 SRC = ROOT / "src"
 RUN = ROOT / "run.py"
+SETTINGS_DIALOG = SRC / "erpermitsys" / "ui" / "settings_dialog.py"
+
+if not RUN.is_file():
+    raise SystemExit(f"PyInstaller spec root resolution failed: missing {RUN}")
+if not SETTINGS_DIALOG.is_file():
+    raise SystemExit(f"Required module source is missing: {SETTINGS_DIALOG}")
 
 # Ensure hook helpers can import our package when collecting modules/data.
 sys.path.insert(0, str(ROOT))
@@ -40,6 +47,18 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Force-include settings dialog from source path. This avoids CI variability in
+# submodule discovery and guarantees startup import availability.
+if not any(entry[0] == "erpermitsys.ui.settings_dialog" for entry in a.pure):
+    a.pure += TOC(
+        [
+            (
+                "erpermitsys.ui.settings_dialog",
+                str(SETTINGS_DIALOG),
+                "PYMODULE",
+            )
+        ]
+    )
 pyz = PYZ(a.pure)
 
 exe = EXE(
